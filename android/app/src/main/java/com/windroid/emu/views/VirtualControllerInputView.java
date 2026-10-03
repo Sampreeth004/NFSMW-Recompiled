@@ -203,32 +203,32 @@ public class VirtualControllerInputView extends View {
         addControl(SWITCH_BTN, 0.5F, 0.062F, 0.0F, SHAPE_PILL, "");
 
         if (MODE_RACING.equals(mode)) {
-            addControl(STEER_L,      0.105F, 0.735F, 0.300F, SHAPE_CIRCLE,    "◀");
-            addControl(STEER_R,      0.280F, 0.735F, 0.300F, SHAPE_CIRCLE,    "▶");
-            addControl(BRAKE_PEDAL,  0.735F, 0.775F, 0.220F, SHAPE_CIRCLE,    "BRK");
-            addControl(GAS_PEDAL,    0.915F, 0.775F, 0.220F, SHAPE_CIRCLE,    "GAS");
-            addControl(NITRO,        0.915F, 0.440F, 0.165F, SHAPE_CIRCLE,    "NOS");
-            addControl(HANDBRAKE,    0.735F, 0.440F, 0.165F, SHAPE_CIRCLE,    "HB");
-            addControl(SPEEDBREAKER, 0.585F, 0.600F, 0.150F, SHAPE_CIRCLE,    "SB");
-            addControl(PAUSE_BTN,    0.945F, 0.115F, 0.125F, SHAPE_CIRCLE,    "II");
-            addControl(CAMERA_BTN,   0.810F, 0.115F, 0.125F, SHAPE_CIRCLE,    "CAM");
-            addControl(RESET_BTN,    0.055F, 0.115F, 0.125F, SHAPE_CIRCLE,    "RST");
+            addControl(STEER_L,      0.105F, 0.735F, 0.135F, SHAPE_CIRCLE,    "◀");
+            addControl(STEER_R,      0.280F, 0.735F, 0.135F, SHAPE_CIRCLE,    "▶");
+            addControl(BRAKE_PEDAL,  0.735F, 0.775F, 0.100F, SHAPE_CIRCLE,    "BRK");
+            addControl(GAS_PEDAL,    0.915F, 0.775F, 0.100F, SHAPE_CIRCLE,    "GAS");
+            addControl(NITRO,        0.915F, 0.440F, 0.075F, SHAPE_CIRCLE,    "NOS");
+            addControl(HANDBRAKE,    0.735F, 0.440F, 0.075F, SHAPE_CIRCLE,    "HB");
+            addControl(SPEEDBREAKER, 0.585F, 0.600F, 0.068F, SHAPE_CIRCLE,    "SB");
+            addControl(PAUSE_BTN,    0.945F, 0.115F, 0.058F, SHAPE_CIRCLE,    "II");
+            addControl(CAMERA_BTN,   0.810F, 0.115F, 0.058F, SHAPE_CIRCLE,    "CAM");
+            addControl(RESET_BTN,    0.055F, 0.115F, 0.058F, SHAPE_CIRCLE,    "RST");
         } else {
-            addControl(A_BUTTON,      0.860F, 0.843F, 0.167F, SHAPE_CIRCLE,    "A");
-            addControl(B_BUTTON,      0.919F, 0.681F, 0.167F, SHAPE_CIRCLE,    "B");
-            addControl(X_BUTTON,      0.802F, 0.681F, 0.167F, SHAPE_CIRCLE,    "X");
-            addControl(Y_BUTTON,      0.860F, 0.519F, 0.167F, SHAPE_CIRCLE,    "Y");
-            addControl(START_BUTTON,  0.554F, 0.907F, 0.120F, SHAPE_CIRCLE,    "");
-            addControl(SELECT_BUTTON, 0.467F, 0.907F, 0.120F, SHAPE_CIRCLE,    "");
-            addControl(LB_BUTTON,     0.117F, 0.278F, 0.240F, SHAPE_RECTANGLE, "LB");
-            addControl(LT_BUTTON,     0.117F, 0.130F, 0.240F, SHAPE_RECTANGLE, "LT");
-            addControl(RB_BUTTON,     0.860F, 0.278F, 0.240F, SHAPE_RECTANGLE, "RB");
-            addControl(RT_BUTTON,     0.860F, 0.130F, 0.240F, SHAPE_RECTANGLE, "RT");
-            addControl(LS_BUTTON,     0.240F, 0.560F, 0.140F, SHAPE_CIRCLE,    "LS");
-            addControl(RS_BUTTON,     0.640F, 0.560F, 0.140F, SHAPE_CIRCLE,    "RS");
-            addControl(LEFT_ANALOG,   0.117F, 0.778F, 0.255F, SHAPE_CIRCLE,    "");
-            addControl(RIGHT_ANALOG,  0.729F, 0.560F, 0.255F, SHAPE_CIRCLE,    "");
-            addControl(DPAD_CONTROL,  0.267F, 0.444F, 0.185F, SHAPE_DPAD,      "");
+            addControl(A_BUTTON,      0.860F, 0.843F, 0.075F, SHAPE_CIRCLE,    "A");
+            addControl(B_BUTTON,      0.919F, 0.681F, 0.075F, SHAPE_CIRCLE,    "B");
+            addControl(X_BUTTON,      0.802F, 0.681F, 0.075F, SHAPE_CIRCLE,    "X");
+            addControl(Y_BUTTON,      0.860F, 0.519F, 0.075F, SHAPE_CIRCLE,    "Y");
+            addControl(START_BUTTON,  0.554F, 0.907F, 0.054F, SHAPE_CIRCLE,    "");
+            addControl(SELECT_BUTTON, 0.467F, 0.907F, 0.054F, SHAPE_CIRCLE,    "");
+            addControl(LB_BUTTON,     0.117F, 0.278F, 0.108F, SHAPE_RECTANGLE, "LB");
+            addControl(LT_BUTTON,     0.117F, 0.130F, 0.108F, SHAPE_RECTANGLE, "LT");
+            addControl(RB_BUTTON,     0.860F, 0.278F, 0.108F, SHAPE_RECTANGLE, "RB");
+            addControl(RT_BUTTON,     0.860F, 0.130F, 0.108F, SHAPE_RECTANGLE, "RT");
+            addControl(LS_BUTTON,     0.240F, 0.560F, 0.075F, SHAPE_CIRCLE,    "LS");
+            addControl(RS_BUTTON,     0.640F, 0.560F, 0.075F, SHAPE_CIRCLE,    "RS");
+            addControl(LEFT_ANALOG,   0.117F, 0.778F, 0.115F, SHAPE_CIRCLE,    "");
+            addControl(RIGHT_ANALOG,  0.729F, 0.560F, 0.115F, SHAPE_CIRCLE,    "");
+            addControl(DPAD_CONTROL,  0.267F, 0.444F, 0.083F, SHAPE_DPAD,      "");
         }
 
         // Restore user-moved positions (normalized, per layout).
@@ -260,9 +260,9 @@ public class VirtualControllerInputView extends View {
         for (VCControl c : controls) {
             c.x = c.nx * w;
             c.y = c.ny * h;
-            c.radius = (c.id == SWITCH_BTN ? 0.075F : c.nradius) * scaleBase * layoutScale;
+            c.radius = (c.id == SWITCH_BTN ? 0.040F : c.nradius) * scaleBase * layoutScale;
         }
-        textPaint.setTextSize(Math.max(30F, 0.055F * scaleBase * layoutScale));
+        textPaint.setTextSize(Math.max(22F, 0.024F * scaleBase * layoutScale));
     }
 
     @Override
