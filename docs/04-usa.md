@@ -33,9 +33,11 @@ Never copy a PAL address into the USA config without checking its delta.
   curated the same way as the PAL `huecos.toml`.
 - `app/nfsmw_manifest.toml` — `includes` now selects the USA files. To go back to
   PAL: `includes = ["overrides.toml", "huecos.toml"]`.
-- `app/src/nfsmw_app.h` — the Black Edition flag address is region-specific. On USA
-  it is skipped instead of writing the PAL address (which would corrupt unrelated
-  memory). The USA address is still unknown.
+- `app/src/nfsmw_app.h` — the Black Edition flag is enabled for both regions: it is
+  the same data address in every known version (`0x82A2CE04`, confirmed by Xenia's
+  patch DB for all six hashes including NTSC-U).
+- `launcher-linux/game_config.*` — English (US) locale defaults: language 1 /
+  country 103 instead of the PAL Spain 5 / 31.
 - `tools/parche_fpu.py` — SDK fix required by the USA build (see below).
 - `tools/huecos_continuaciones.py` — computes the "continuation" entries of a gap
   list from a codegen log; kept for regenerating either region.
@@ -61,10 +63,14 @@ and those opens fail on this disc, which is expected and harmless.
 
 ## Known gaps
 
-- **Black Edition flag**: the USA address has not been located yet; the native patch
-  is skipped.
-- **Launcher language defaults**: the launcher still defaults to the PAL Spain
-  language/country IDs; set English (language 1) for the USA build.
+- **Black Edition flag**: the address is shared by all versions (`0x82A2CE04`, per
+  Xenia's patch DB) and the patch applies, but unlocking it on a regular USA disc
+  makes the game read Black Edition car data that is not on the disc (guest access
+  violation reading guest `0x8`). The cvar now defaults to off; enable it only with
+  Black Edition data.
+- **Launcher language defaults**: the Linux launcher now defaults to English (US),
+  language 1 / country 103. The Windows launcher already used the SDK defaults,
+  which are also English (US).
 - Missing `NtCreateFile` probes in the log (`GLOBAL\GAMEPLAY.LZC`, `SOUND\...`) are
   normal for this disc image.
 

@@ -498,25 +498,17 @@ class NfsmwApp : public rex::ReXApp {
   // ==========================================================================
 
   void AplicarParcheBlackEdition() {
-    // The Black Edition flag is a piece of DATA in the XEX, not code: each
-    // version of the game has its own at a different address. Writing the PAL
-    // one into the USA XEX would mean writing 0x100 at an address that is
-    // something else entirely there.
+    // The Black Edition flag is a piece of DATA in the XEX, and it is at the
+    // SAME address in every known version: Xenia's patch DB
+    // (454107D9 - Need for Speed Most Wanted (2005).patch.toml) applies
+    // data_write(be32, 0x82A2CE04, 0x00000100) to all six hashes, NTSC-U
+    // included (PAL-ENG/GER/ITA/SPA, NTSC-J, NTSC-U).
     //
-    //   PAL Spain (code_base 0x82020000): 0x82A2CE04
-    //   USA       (code_base 0x820E0000): not located yet; skipped
-    //
-    // For the USA: Xenia keeps .patch.toml patches per title/version; the
-    // address will come from there. Meanwhile, the game starts without the
-    // unlock.
-    const uint32_t kBlackEditionAddr =
-        (PPCImageConfig.code_base == 0x82020000u) ? 0x82A2CE04u : 0u;
-    if (kBlackEditionAddr == 0u) {
-      REXLOG_INFO("[black-edition] version with no known address (code_base "
-                  "0x{:08X}); the patch is not applied.",
-                  PPCImageConfig.code_base);
-      return;
-    }
+    // WARNING: the address is right, but unlocking the content on a regular
+    // USA disc makes the game read Black Edition car data that is not on the
+    // disc (guest access violation reading guest 0x8). The cvar defaults to
+    // false for that reason; enable it only with Black Edition data.
+    constexpr uint32_t kBlackEditionAddr = 0x82A2CE04u;
     auto* kernel = rex::system::kernel_state();
     if (kernel == nullptr || kernel->memory() == nullptr) {
       REXLOG_WARN("[black-edition] no memory kernel; cannot patch.");

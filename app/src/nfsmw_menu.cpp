@@ -30,9 +30,15 @@
 //
 //  The patch is applied when the XEX is loaded (OnPostLoadXexImage in
 //  nfsmw_app.h), which is why this flag requires a restart to toggle.
+//
+//  OFF by default: the flag address is the same in every version (Xenia patch
+//  DB), but unlocking it on a regular USA disc makes the game dereference
+//  Black Edition car data that is not on the disc: guest access violation
+//  reading guest 0x8. Turn it on only with actual Black Edition content.
 // ---------------------------------------------------------------------------
-REXCVAR_DEFINE_BOOL(black_edition, true, "Content",
-                    "Black Edition content: paid cars as downloadable (requires restart)")
+REXCVAR_DEFINE_BOOL(black_edition, false, "Content",
+                    "Black Edition content: paid cars as downloadable (requires restart; "
+                    "needs Black Edition data, crashes without it)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
