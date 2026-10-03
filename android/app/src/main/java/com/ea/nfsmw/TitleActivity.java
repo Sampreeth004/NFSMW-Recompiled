@@ -869,7 +869,7 @@ public class TitleActivity extends Activity {
         setupSpinner(spLogLevel, logLabels);
 
         // Load saved values
-        String curRes = prefs.getString(KEY_RESOLUTION, "720p");
+        String curRes = prefs.getString(KEY_RESOLUTION, "540p");
         spResolution.setSelection(findStringIndex(resValues, curRes, 0));
 
         int curScale = prefs.getInt(KEY_RESOLUTION_SCALE, 1);
@@ -1105,7 +1105,7 @@ public class TitleActivity extends Activity {
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 
-            String res = prefs.getString(KEY_RESOLUTION, "720p");
+            String res = prefs.getString(KEY_RESOLUTION, "540p");
             int scale = prefs.getInt(KEY_RESOLUTION_SCALE, 1);
             String plugin = prefs.getString(KEY_GPU_PLUGIN, "xenos");
             boolean vsync = prefs.getBoolean(KEY_VSYNC, true);

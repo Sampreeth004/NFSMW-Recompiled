@@ -393,9 +393,12 @@ void android_main(struct android_app* state) {
   // keeps crackle off through shader compilation hitches.
   SetDefaultFlag("audio_maxqframes", "24");
 
-  // 1280x720 Native Xbox 360 resolution fits within Adreno 650/730 GMEM on-chip tile memory
-  SetDefaultFlag("video_mode_width", "1280");
-  SetDefaultFlag("video_mode_height", "720");
+  // 960x540 (540p) as the Android baseline: the Xenos GPU emulation renders at
+  // the guest video mode, so this is where most of the pixel cost is. 720p
+  // costs ~70% more and visibly lags on 2025-era phone GPUs; bump up in the
+  // launcher settings if the device can afford it.
+  SetDefaultFlag("video_mode_width", "960");
+  SetDefaultFlag("video_mode_height", "540");
   SetDefaultFlag("resolution_scale", "1");
   SetDefaultFlag("anisotropic_override", "1");
 
