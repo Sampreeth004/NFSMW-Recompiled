@@ -50,6 +50,8 @@ class AndroidInputDriver final : public InputDriver {
   void HandleGamepadKeyEvent(const AInputEvent* event);
   // Handles touch events
   void HandleTouchEvent(const AInputEvent* event);
+  // Handles soft/hardware keyboard events (IME text input for ImGui dialogs)
+  void HandleKeyboardKeyEvent(const AInputEvent* event);
 };
 
 class AndroidInputSystem final : public InputSystem {

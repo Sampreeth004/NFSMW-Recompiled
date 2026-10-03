@@ -1,6 +1,8 @@
 #include "android_window.h"
 #include "android_app_context.h"
 #include <android/log.h>
+#include <android/input.h>
+#include <imgui.h>
 #include <rex/platform/android/android_bridge.h>
 
 #define TAG "NFS-AndroidWindow"
@@ -118,7 +120,61 @@ AndroidWindow* AndroidWindow::GetActiveWindow() {
 }
 
 void AndroidWindow::PaintFrame() {
+  UpdateSoftKeyboard();
   OnPaint(false);
+}
+
+void AndroidWindow::DispatchTouchEvent(uint32_t pointer_id, TouchEvent::Action action,
+                                       float x, float y) {
+  WindowDestructionReceiver receiver(this);
+  TouchEvent e(this, pointer_id, action, x, y);
+  OnTouchEvent(e, receiver);
+}
+
+void AndroidWindow::DispatchKeyChar(uint32_t codepoint) {
+  WindowDestructionReceiver receiver(this);
+  KeyEvent e(this, VirtualKey(codepoint), /*repeat_count=*/1,
+             /*prev_state=*/false,
+             /*modifier_shift_pressed=*/false, /*modifier_ctrl_pressed=*/false,
+             /*modifier_alt_pressed=*/false, /*modifier_super_pressed=*/false);
+  OnKeyChar(e, receiver);
+}
+
+void AndroidWindow::DispatchKey(VirtualKey virtual_key, bool is_down) {
+  WindowDestructionReceiver receiver(this);
+  KeyEvent e(this, virtual_key, /*repeat_count=*/1,
+             /*prev_state=*/!is_down,
+             /*modifier_shift_pressed=*/false, /*modifier_ctrl_pressed=*/false,
+             /*modifier_alt_pressed=*/false, /*modifier_super_pressed=*/false);
+  if (is_down) {
+    OnKeyDown(e, receiver);
+  } else {
+    OnKeyUp(e, receiver);
+  }
+}
+
+void AndroidWindow::UpdateSoftKeyboard() {
+  if (!ImGui::GetCurrentContext()) {
+    return;
+  }
+  const bool want = ImGui::GetIO().WantTextInput;
+  if (want == soft_keyboard_visible_) {
+    return;
+  }
+
+  auto* android_ctx = dynamic_cast<AndroidWindowedAppContext*>(&app_context());
+  if (!android_ctx || !android_ctx->app() || !android_ctx->app()->activity) {
+    return;
+  }
+
+  if (want) {
+    ANativeActivity_showSoftInput(android_ctx->app()->activity,
+                                  ANATIVEACTIVITY_SHOW_SOFT_INPUT_FORCED);
+  } else {
+    ANativeActivity_hideSoftInput(android_ctx->app()->activity,
+                                  ANATIVEACTIVITY_HIDE_SOFT_INPUT_NOT_ALWAYS);
+  }
+  soft_keyboard_visible_ = want;
 }
 
 void AndroidWindow::RequestPaintImpl() {

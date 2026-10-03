@@ -1,7 +1,9 @@
 #include "android_input_driver.h"
+#include "ui/android_window.h"
 #include <android/log.h>
 #include <android/keycodes.h>
 #include <rex/input/device_assignment.h>
+#include <rex/ui/virtual_key.h>
 #include <cmath>
 #include <algorithm>
 
@@ -192,6 +194,10 @@ bool AndroidInputDriver::HandleInputEvent(const AInputEvent* event) {
       HandleGamepadKeyEvent(event);
       return true;
     }
+    // Soft keyboard (IME) and hardware keyboards, including Android's BACK
+    // button (consumed so it closes dialogs instead of ending the activity).
+    HandleKeyboardKeyEvent(event);
+    return true;
   } else if (event_type == AINPUT_EVENT_TYPE_MOTION) {
     if ((source & AINPUT_SOURCE_GAMEPAD) || (source & AINPUT_SOURCE_JOYSTICK)) {
       HandleGamepadMotionEvent(event);
@@ -290,35 +296,135 @@ void AndroidInputDriver::HandleTouchEvent(const AInputEvent* event) {
   int32_t action_code = action & AMOTION_EVENT_ACTION_MASK;
   size_t pointer_index = static_cast<size_t>((action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
 
-  std::lock_guard<std::mutex> lock(state_mutex_);
+  struct TouchForward {
+    uint32_t id;
+    rex::ui::TouchEvent::Action action;
+    float x;
+    float y;
+  };
+  std::vector<TouchForward> forwards;
 
-  switch (action_code) {
-    case AMOTION_EVENT_ACTION_DOWN:
-    case AMOTION_EVENT_ACTION_POINTER_DOWN: {
-      int id = AMotionEvent_getPointerId(event, pointer_index);
-      float x = AMotionEvent_getX(event, pointer_index);
-      float y = AMotionEvent_getY(event, pointer_index);
-      touch_overlay_.ProcessPointerDown(id, x, y);
-      break;
-    }
-    case AMOTION_EVENT_ACTION_MOVE: {
-      size_t count = AMotionEvent_getPointerCount(event);
-      for (size_t i = 0; i < count; ++i) {
-        int id = AMotionEvent_getPointerId(event, i);
-        float x = AMotionEvent_getX(event, i);
-        float y = AMotionEvent_getY(event, i);
-        touch_overlay_.ProcessPointerMove(id, x, y);
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+
+    switch (action_code) {
+      case AMOTION_EVENT_ACTION_DOWN:
+      case AMOTION_EVENT_ACTION_POINTER_DOWN: {
+        int id = AMotionEvent_getPointerId(event, pointer_index);
+        float x = AMotionEvent_getX(event, pointer_index);
+        float y = AMotionEvent_getY(event, pointer_index);
+        touch_overlay_.ProcessPointerDown(id, x, y);
+        forwards.push_back({static_cast<uint32_t>(id),
+                            rex::ui::TouchEvent::Action::kDown, x, y});
+        break;
       }
-      break;
+      case AMOTION_EVENT_ACTION_MOVE: {
+        size_t count = AMotionEvent_getPointerCount(event);
+        for (size_t i = 0; i < count; ++i) {
+          int id = AMotionEvent_getPointerId(event, i);
+          float x = AMotionEvent_getX(event, i);
+          float y = AMotionEvent_getY(event, i);
+          touch_overlay_.ProcessPointerMove(id, x, y);
+          forwards.push_back({static_cast<uint32_t>(id),
+                              rex::ui::TouchEvent::Action::kMove, x, y});
+        }
+        break;
+      }
+      case AMOTION_EVENT_ACTION_UP:
+      case AMOTION_EVENT_ACTION_POINTER_UP:
+      case AMOTION_EVENT_ACTION_CANCEL: {
+        int id = AMotionEvent_getPointerId(event, pointer_index);
+        touch_overlay_.ProcessPointerUp(id);
+        forwards.push_back({static_cast<uint32_t>(id),
+                            action_code == AMOTION_EVENT_ACTION_CANCEL
+                                ? rex::ui::TouchEvent::Action::kCancel
+                                : rex::ui::TouchEvent::Action::kUp,
+                            AMotionEvent_getX(event, pointer_index),
+                            AMotionEvent_getY(event, pointer_index)});
+        break;
+      }
+      default: break;
     }
-    case AMOTION_EVENT_ACTION_UP:
-    case AMOTION_EVENT_ACTION_POINTER_UP:
-    case AMOTION_EVENT_ACTION_CANCEL: {
-      int id = AMotionEvent_getPointerId(event, pointer_index);
-      touch_overlay_.ProcessPointerUp(id);
-      break;
+  }
+
+  // Forward to the window listeners (ImGuiDrawer) so ImGui dialogs - the
+  // XamShowKeyboardUI alias screen, message boxes, the in-game menu - are
+  // usable on a touch screen. The drawer filters by pointer id itself.
+  if (auto* window = rex::ui::AndroidWindow::GetActiveWindow()) {
+    for (const auto& f : forwards) {
+      window->DispatchTouchEvent(f.id, f.action, f.x, f.y);
     }
-    default: break;
+  }
+}
+
+void AndroidInputDriver::HandleKeyboardKeyEvent(const AInputEvent* event) {
+  int32_t action = AKeyEvent_getAction(event);
+  auto* window = rex::ui::AndroidWindow::GetActiveWindow();
+  if (!window) {
+    return;
+  }
+
+  int32_t key_code = AKeyEvent_getKeyCode(event);
+
+  // Non-character keys are forwarded on both edges; characters only on DOWN
+  // so autorepeat does not spam.
+  if (action == AKEY_EVENT_ACTION_DOWN) {
+    const bool shift = (AKeyEvent_getMetaState(event) & AMETA_SHIFT_ON) != 0;
+
+    uint32_t ch = 0;
+    if (key_code >= AKEYCODE_A && key_code <= AKEYCODE_Z) {
+      ch = static_cast<uint32_t>('a' + (key_code - AKEYCODE_A));
+      if (shift) ch -= 'a' - 'A';
+    } else if (key_code >= AKEYCODE_0 && key_code <= AKEYCODE_9) {
+      ch = static_cast<uint32_t>('0' + (key_code - AKEYCODE_0));
+    } else if (key_code == AKEYCODE_SPACE) {
+      ch = ' ';
+    } else if (key_code == AKEYCODE_PERIOD) {
+      ch = shift ? ':' : '.';
+    } else if (key_code == AKEYCODE_COMMA) {
+      ch = shift ? ';' : ',';
+    } else if (key_code == AKEYCODE_MINUS) {
+      ch = shift ? '_' : '-';
+    }
+
+    if (ch != 0) {
+      window->DispatchKeyChar(ch);
+      return;
+    }
+
+    switch (key_code) {
+      case AKEYCODE_DEL:
+        window->DispatchKey(rex::ui::VirtualKey::kBack, true);
+        break;
+      case AKEYCODE_ENTER:
+      case AKEYCODE_NUMPAD_ENTER:
+      case AKEYCODE_DPAD_CENTER:
+        window->DispatchKey(rex::ui::VirtualKey::kReturn, true);
+        break;
+      case AKEYCODE_ESCAPE:
+      case AKEYCODE_BACK:
+        window->DispatchKey(rex::ui::VirtualKey::kEscape, true);
+        break;
+      default:
+        break;
+    }
+  } else if (action == AKEY_EVENT_ACTION_UP) {
+    switch (key_code) {
+      case AKEYCODE_DEL:
+        window->DispatchKey(rex::ui::VirtualKey::kBack, false);
+        break;
+      case AKEYCODE_ENTER:
+      case AKEYCODE_NUMPAD_ENTER:
+      case AKEYCODE_DPAD_CENTER:
+        window->DispatchKey(rex::ui::VirtualKey::kReturn, false);
+        break;
+      case AKEYCODE_ESCAPE:
+      case AKEYCODE_BACK:
+        window->DispatchKey(rex::ui::VirtualKey::kEscape, false);
+        break;
+      default:
+        break;
+    }
   }
 }
 
