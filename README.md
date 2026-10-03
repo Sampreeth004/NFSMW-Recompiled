@@ -72,14 +72,14 @@ Step-by-step detail, including what to do when something fails:
 
 ## Documentation
 
-The README is in English; the technical documentation is in Spanish, matching the
-source comments.
+The README and the technical documentation are in English.
 
 | Document | What it covers |
 |---|---|
 | [docs/arquitectura.md](docs/arquitectura.md) | How the pieces fit: SDK, app, patches, launcher |
 | [docs/compilar.md](docs/compilar.md) | Building from a clean checkout |
 | [docs/parches.md](docs/parches.md) | Every patch: what it changes, why, and how it was verified |
+| [docs/04-usa.md](docs/04-usa.md) | USA (NTSC) support: region deltas, overrides, the FP fix |
 | [docs/lanzador.md](docs/lanzador.md) | The launcher, its settings and how it is built |
 | [docs/rendimiento.md](docs/rendimiento.md) | Measured findings: EDRAM paths, resolution scaling, frame pacing |
 | [docs/problemas-conocidos.md](docs/problemas-conocidos.md) | What is broken and how far each one was traced |
@@ -151,7 +151,7 @@ work with its own terms.
 Need for Speed and Most Wanted are trademarks of Electronic Arts Inc. This project is
 not affiliated with, endorsed by, or connected to Electronic Arts in any way.
 
-⚠️ IMPORTANT ROM REQUIREMENT: This project strictly requires the Need for Speed: Most Wanted (2005) [Xbox 360] ROM in its PAL Spain version. PAL UK (English) or NTSC (US) versions are not acceptable (for now).
+⚠️ IMPORTANT ROM REQUIREMENT: this fork supports the Need for Speed: Most Wanted (2005) [Xbox 360] ROM in two versions: **PAL Spain** (the original target of the Spanish project) and **NTSC/USA** (English, added by this fork). PAL UK is not supported. See [docs/04-usa.md](docs/04-usa.md) for the USA build notes.
 
 ## Credits
 
