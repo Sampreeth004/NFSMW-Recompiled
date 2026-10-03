@@ -387,6 +387,12 @@ void android_main(struct android_app* state) {
   SetDefaultFlag("mnk_mode", "false");
   SetDefaultFlag("present_letterbox", "false");
 
+  // Audio queue depth: the SDK default (8 frames, ~43 ms) starves the SDL/
+  // AAudio feeder during load spikes and frame drops - the same crackling the
+  // Windows launcher fixed with 16. Mobile needs more headroom; 24 (~128 ms)
+  // keeps crackle off through shader compilation hitches.
+  SetDefaultFlag("audio_maxqframes", "24");
+
   // 1280x720 Native Xbox 360 resolution fits within Adreno 650/730 GMEM on-chip tile memory
   SetDefaultFlag("video_mode_width", "1280");
   SetDefaultFlag("video_mode_height", "720");

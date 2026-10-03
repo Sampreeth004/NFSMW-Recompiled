@@ -1174,7 +1174,8 @@ public class TitleActivity extends Activity {
             toml.append("gamma_render_target_as_unorm16 = false").append((char) 10).append((char) 10);
 
             toml.append("audio_mute = ").append(mute ? "true" : "false").append((char) 10);
-            toml.append("mnk_mode = ").append(mnk ? "true" : "false").append((char) 10).append((char) 10);
+            toml.append("mnk_mode = ").append(mnk ? "true" : "false").append((char) 10);
+            toml.append("audio_maxqframes = 24").append((char) 10).append((char) 10);
 
             toml.append("black_edition = ").append(black ? "true" : "false").append((char) 10);
             toml.append("grant_user_privileges = ").append(grant ? "true" : "false").append((char) 10);
