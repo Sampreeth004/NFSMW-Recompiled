@@ -836,8 +836,8 @@ public class TitleActivity extends Activity {
         final String[] scaleLabels = {"1x - Native (Fastest)", "2x - 1440p (High Sharpness)", "3x - 4K"};
         final int[] scaleValues = {1, 2, 3};
 
-        final String[] pluginLabels = {"Plume (Native Vulkan - Fast)", "Xenos (Emulated Vulkan)"};
-        final String[] pluginValues = {"plume", "xenos"};
+        final String[] pluginLabels = {"Xenos (Emulated Vulkan - Compatible)", "Plume (Native Vulkan - Experimental)"};
+        final String[] pluginValues = {"xenos", "plume"};
 
         final String[] edramLabels = {"rtv (Host FBO - Fast / Recommended)", "rov (Pixel Shader Interlock - Slow)"};
         final String[] edramValues = {"rtv", "rov"};
@@ -875,7 +875,7 @@ public class TitleActivity extends Activity {
         int curScale = prefs.getInt(KEY_RESOLUTION_SCALE, 1);
         spResolutionScale.setSelection(findIntIndex(scaleValues, curScale, 0));
 
-        String curPlugin = prefs.getString(KEY_GPU_PLUGIN, "plume");
+        String curPlugin = prefs.getString(KEY_GPU_PLUGIN, "xenos");
         spGpuPlugin.setSelection(findStringIndex(pluginValues, curPlugin, 0));
 
         String curEdram = prefs.getString(KEY_EDRAM_PATH, "rtv");
@@ -1052,7 +1052,7 @@ public class TitleActivity extends Activity {
 
             String res = prefs.getString(KEY_RESOLUTION, "720p");
             int scale = prefs.getInt(KEY_RESOLUTION_SCALE, 1);
-            String plugin = prefs.getString(KEY_GPU_PLUGIN, "plume");
+            String plugin = prefs.getString(KEY_GPU_PLUGIN, "xenos");
             boolean vsync = prefs.getBoolean(KEY_VSYNC, true);
             boolean stretchScreen = prefs.getBoolean(KEY_STRETCH_SCREEN, true);
             String edram = prefs.getString(KEY_EDRAM_PATH, "rtv");
