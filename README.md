@@ -15,6 +15,11 @@ calls, the filesystem, audio, input, and a translation of the Xenos GPU to Direc
 `default.xex`, no generated C++, and no compiled binary — and it never will. See
 [Legal](#legal).
 
+**Launcher download:** the standalone launcher (choose your own ISO, configure and
+play) is on the [Releases](https://github.com/Sampreeth004/NFSMW-Recompiled/releases)
+page. You still need to build the game from your own disc dump; the launcher only
+picks the ISO and configures the run.
+
 ---
 
 ## Status
