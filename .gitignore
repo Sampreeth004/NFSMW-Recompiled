@@ -76,6 +76,13 @@ compile_commands.json
 __pycache__/
 *.pyc
 
+# --- Android -----------------------------------------------------------------
+# Machine-specific paths and native build artifacts. The prebuilt Android
+# ReXGlue SDK in android/rexglue-sdk IS versioned (the APK build links it).
+android/local.properties
+android/.gradle/
+android/app/.cxx/
+
 # --- Patch backups -----------------------------------------------------------
 # The current patches apply and revert by text and do not leave .original
 # files, but some of the SDK ones still generate them.

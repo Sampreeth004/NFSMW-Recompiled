@@ -125,6 +125,24 @@ they are idempotent, and `--revertir` restores the original. Run any of them wit
 `--estado` to see what is applied. The reasoning behind that design, and the bugs that
 forced it, are in [docs/parches.md](docs/parches.md).
 
+## Android launcher (APK)
+
+The `android/` directory contains a standalone Android port: a launcher APK where
+you pick your own game ISO, configure the engine and play, with an on-screen
+Xbox 360 gamepad overlay. It targets arm64-v8a (Android 8.0+), renders through
+Vulkan (Plume or Xenos plugin) and outputs audio through AAudio.
+
+The port is based on the Android build by
+[WINDROID-EMU](https://github.com/WINDROID-EMU/NFSMW-RECOMP) (itself forked from
+[madelrandel-blip](https://github.com/madelrandel-blip/NFSMW-Recompiled)); this
+fork carries it with an English launcher UI and builds against this fork's own
+USA codegen output.
+
+Build it on Windows with `CONSTRUIR_APK.bat` (requires the Android SDK, NDK
+27.2.12479018 and CMake 3.22.1; paths are in the script header). The same legal
+rules apply: the APK contains the game's own translated code, so it is for your
+own use and must never be distributed.
+
 ## Contributing
 
 Pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first — the
@@ -163,3 +181,5 @@ not affiliated with, endorsed by, or connected to Electronic Arts in any way.
 - [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk) — the runtime this is built on
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) — the static recompilation approach
 - [Xenia](https://xenia.jp/) — the kernel and GPU emulation ReXGlue descends from
+- [WINDROID-EMU](https://github.com/WINDROID-EMU/NFSMW-RECOMP) — the Android port the launcher APK is based on
+- [madelrandel-blip](https://github.com/madelrandel-blip/NFSMW-Recompiled) — upstream of this fork
