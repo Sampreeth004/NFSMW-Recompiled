@@ -2,6 +2,7 @@ package com.ea.nfsmw;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -11,8 +12,10 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -401,68 +404,209 @@ public class TitleActivity extends Activity {
             if (verifyGameFiles(target)) {
                 applyVerifiedGamePath(resolvedPath, true);
                 Toast.makeText(this, "✔ Game files verified successfully!", Toast.LENGTH_SHORT).show();
-            } else {
-                new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                        .setTitle("Invalid Files")
-                        .setMessage(R.string.error_files_missing)
-                        .setPositiveButton("OK", null)
-                        .show();
+                return;
             }
+        }
+
+        if (requestCode == REQ_CODE_ISO) {
+            // The storage provider did not expose a directly readable path
+            // (Downloads / Files apps return content:// URIs that cannot be
+            // mapped to /storage/...). Import a copy into app storage instead;
+            // that always works because we hold read permission on the URI.
+            importIsoFromUri(uri);
         } else {
-            Toast.makeText(this, "Could not resolve the path of the selected folder.", Toast.LENGTH_LONG).show();
+            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("Invalid Files")
+                    .setMessage(R.string.error_files_missing)
+                    .setPositiveButton("OK", null)
+                    .show();
         }
     }
 
     /**
-     * Converte URIs de DocumentTree e Document em caminhos absolutos do sistema de arquivos
+     * Converts URIs from DocumentTree and Document pickers into absolute
+     * filesystem paths. Handles the common providers: primary storage,
+     * "raw:" Downloads entries, "home:", removable SD-card volumes and plain
+     * file:// URIs. Returns null when the provider cannot be mapped (the
+     * caller then falls back to importing a copy of the file).
      */
     private String resolveRealPathFromUri(Uri uri, boolean isTree) {
         try {
-            String path = uri.getPath();
-            if (isTree) {
-                String treeDocId = DocumentsContract.getTreeDocumentId(uri);
-                if (treeDocId != null) {
-                    if (treeDocId.startsWith("primary:")) {
-                        return Environment.getExternalStorageDirectory().getAbsolutePath() + "/" + treeDocId.substring("primary:".length());
-                    } else if (treeDocId.contains(":")) {
-                        String[] parts = treeDocId.split(":", 2);
-                        return "/storage/" + parts[0] + "/" + parts[1];
-                    }
-                }
-            } else {
-                if (DocumentsContract.isDocumentUri(this, uri)) {
-                    String docId = DocumentsContract.getDocumentId(uri);
-                    if (docId != null && docId.startsWith("primary:")) {
-                        return Environment.getExternalStorageDirectory().getAbsolutePath() + "/" + docId.substring("primary:".length());
-                    } else if (docId != null && docId.contains(":")) {
-                        String[] parts = docId.split(":", 2);
-                        return "/storage/" + parts[0] + "/" + parts[1];
-                    }
+            // 1. Plain file:// URIs (some file managers).
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                return uri.getPath();
+            }
+
+            // 2. Document / tree URIs via DocumentsContract.
+            String docId = null;
+            if (isTree && DocumentsContract.isTreeUri(uri)) {
+                docId = DocumentsContract.getTreeDocumentId(uri);
+            } else if (DocumentsContract.isDocumentUri(this, uri)) {
+                docId = DocumentsContract.getDocumentId(uri);
+            }
+            if (docId != null) {
+                String mapped = documentIdToPath(docId);
+                if (mapped != null) {
+                    return mapped;
                 }
             }
 
-            // Fallback: busca via content resolver
+            // 3. Fallback: query the content resolver for the data column.
             if ("content".equalsIgnoreCase(uri.getScheme())) {
                 String[] projection = { MediaStore.MediaColumns.DATA };
                 try (Cursor cursor = getContentResolver().query(uri, projection, null, null, null)) {
                     if (cursor != null && cursor.moveToFirst()) {
                         int index = cursor.getColumnIndex(MediaStore.MediaColumns.DATA);
                         if (index >= 0) {
-                            return cursor.getString(index);
+                            String data = cursor.getString(index);
+                            if (data != null && !data.isEmpty()) {
+                                return data;
+                            }
                         }
                     }
                 }
             }
 
+            // 4. Old /tree/primary: style paths.
+            String path = uri.getPath();
             if (path != null && path.startsWith("/tree/primary:")) {
                 return Environment.getExternalStorageDirectory().getAbsolutePath() + "/" + path.substring("/tree/primary:".length());
             }
 
-            return path;
+            return null;
         } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
+    }
+
+    /**
+     * Maps a DocumentsContract document/tree ID to a filesystem path, or
+     * returns null when the ID does not correspond to a real path.
+     */
+    private String documentIdToPath(String docId) {
+        if (docId == null) {
+            return null;
+        }
+
+        // Downloads provider: raw:/storage/emulated/0/Download/file.iso
+        if (docId.startsWith("raw:")) {
+            return docId.substring(4);
+        }
+
+        // Primary storage: primary:Download/file.iso
+        if (docId.startsWith("primary:")) {
+            return Environment.getExternalStorageDirectory().getAbsolutePath() + "/"
+                    + docId.substring("primary:".length());
+        }
+
+        // Home directory: home:Documents/...
+        if (docId.startsWith("home:")) {
+            return new File(Environment.getExternalStorageDirectory(), "Documents").getAbsolutePath()
+                    + "/" + docId.substring("home:".length());
+        }
+
+        if (docId.contains(":")) {
+            String[] parts = docId.split(":", 2);
+            // Removable SD cards look like "6236-3231:Some/Path".
+            if (parts[0].matches("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}")) {
+                return "/storage/" + parts[0] + "/" + parts[1];
+            }
+            // MediaStore-style IDs (msf:123, image:42, ...) cannot be mapped
+            // to a real path; the caller falls back to importing a copy.
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Copies the picked ISO into the app's own storage so the engine can read
+     * it regardless of which provider the file was picked from. Shows a
+     * progress dialog and applies the imported file on success.
+     */
+    private void importIsoFromUri(Uri uri) {
+        String displayName = queryDisplayName(uri);
+        File dest = new File(getExternalFilesDir(null), "imported_game.iso");
+
+        final ProgressDialog progress = new ProgressDialog(this);
+        progress.setMessage("Importing " + (displayName != null ? displayName : "ISO") + "...\nLarge discs can take a while.");
+        progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        progress.setIndeterminate(true);
+        progress.setMax(100);
+        progress.setCancelable(false);
+        progress.show();
+
+        new Thread(() -> {
+            boolean ok = false;
+            String error = null;
+            ParcelFileDescriptor pfd = null;
+            try {
+                pfd = getContentResolver().openFileDescriptor(uri, "r");
+                if (pfd == null) {
+                    throw new IllegalStateException("cannot open the selected file");
+                }
+                final long total = pfd.getStatSize();
+                runOnUiThread(() -> {
+                    progress.setIndeterminate(total <= 0);
+                });
+
+                try (InputStream in = new ParcelFileDescriptor.AutoCloseInputStream(pfd);
+                     OutputStream out = new FileOutputStream(dest)) {
+                    pfd = null; // ownership moved to the stream
+                    byte[] buf = new byte[1024 * 1024];
+                    long copied = 0;
+                    long lastPct = -1;
+                    int read;
+                    while ((read = in.read(buf)) != -1) {
+                        out.write(buf, 0, read);
+                        copied += read;
+                        if (total > 0) {
+                            long pct = copied * 100 / total;
+                            if (pct != lastPct) {
+                                lastPct = pct;
+                                progress.setProgress((int) pct);
+                            }
+                        }
+                    }
+                    ok = copied > 0;
+                }
+            } catch (Exception e) {
+                error = e.getMessage();
+            } finally {
+                if (pfd != null) {
+                    try { pfd.close(); } catch (Exception ignored) {}
+                }
+            }
+
+            if (!ok) {
+                dest.delete();
+            }
+            final boolean success = ok;
+            final String err = error;
+            runOnUiThread(() -> {
+                try { progress.dismiss(); } catch (Exception ignored) {}
+                if (success && dest.exists() && dest.length() > 0) {
+                    applyVerifiedGamePath(dest.getAbsolutePath(), true);
+                    Toast.makeText(this, "✔ ISO imported into app storage", Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this, "Import failed: " + (err != null ? err : "unknown error"), Toast.LENGTH_LONG).show();
+                }
+            });
+        }).start();
+    }
+
+    /** Returns the display name of a content URI, or null if unavailable. */
+    private String queryDisplayName(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) {
+                    return cursor.getString(index);
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     @Override
