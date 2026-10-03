@@ -74,7 +74,10 @@ class TouchOverlay {
   uint32_t screen_width_ = 1920;
   uint32_t screen_height_ = 1080;
 
-  bool enabled_ = true;
+  // Disabled by default: the racing layout is now owned by the Java
+  // VirtualControllerInputView (visible, editable, per-layout settings).
+  // This C++ overlay stays available as an invisible fallback via JNI.
+  bool enabled_ = false;
   float opacity_ = 0.82f;
 
   VirtualControlLayout layout_{};

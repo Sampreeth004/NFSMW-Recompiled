@@ -926,6 +926,52 @@ public class TitleActivity extends Activity {
 
         etGamertag.setText(prefs.getString(KEY_GAMERTAG, "Player"));
 
+        // ── Controls section ────────────────────────────────────────────────
+        SharedPreferences ctlPrefs = getSharedPreferences("virtual_controller_windroid", Context.MODE_PRIVATE);
+        Spinner spCtlLayout = dialogView.findViewById(R.id.sp_ctl_layout);
+        SeekBar sbRacingSize = dialogView.findViewById(R.id.sb_ctl_racing_size);
+        SeekBar sbRacingAlpha = dialogView.findViewById(R.id.sb_ctl_racing_alpha);
+        SeekBar sbPadSize = dialogView.findViewById(R.id.sb_ctl_pad_size);
+        SeekBar sbPadAlpha = dialogView.findViewById(R.id.sb_ctl_pad_alpha);
+        TextView tvRacingSize = dialogView.findViewById(R.id.tv_ctl_racing_size);
+        TextView tvRacingAlpha = dialogView.findViewById(R.id.tv_ctl_racing_alpha);
+        TextView tvPadSize = dialogView.findViewById(R.id.tv_ctl_pad_size);
+        TextView tvPadAlpha = dialogView.findViewById(R.id.tv_ctl_pad_alpha);
+        Button btnResetControls = dialogView.findViewById(R.id.btn_reset_controls);
+
+        final String[] ctlLayoutLabels = {"Racing (Steering + Pedals)", "Xbox Gamepad (Full Pad)"};
+        final String[] ctlLayoutValues = {"racing", "gamepad"};
+        setupSpinner(spCtlLayout, ctlLayoutLabels);
+        String curLayout = ctlPrefs.getString("ctl_mode", "gamepad");
+        spCtlLayout.setSelection("racing".equals(curLayout) ? 0 : 1);
+
+        sbRacingSize.setProgress(Math.round(clampF(ctlPrefs.getFloat("ctl_racing_scale", 1.0F), 0.6F, 1.6F) * 100F));
+        sbRacingAlpha.setProgress(Math.round(clampF(ctlPrefs.getFloat("ctl_racing_alpha", 0.85F), 0.25F, 1.0F) * 100F));
+        sbPadSize.setProgress(Math.round(clampF(ctlPrefs.getFloat("ctl_pad_scale", 1.0F), 0.6F, 1.6F) * 100F));
+        sbPadAlpha.setProgress(Math.round(clampF(ctlPrefs.getFloat("ctl_pad_alpha", 0.85F), 0.25F, 1.0F) * 100F));
+        bindPercentSeekBar(sbRacingSize, tvRacingSize, "Racing layout size: ");
+        bindPercentSeekBar(sbRacingAlpha, tvRacingAlpha, "Racing layout opacity: ");
+        bindPercentSeekBar(sbPadSize, tvPadSize, "Gamepad layout size: ");
+        bindPercentSeekBar(sbPadAlpha, tvPadAlpha, "Gamepad layout opacity: ");
+
+        if (btnResetControls != null) {
+            btnResetControls.setOnClickListener(v -> {
+                SharedPreferences.Editor e = ctlPrefs.edit();
+                java.util.ArrayList<String> keys = new java.util.ArrayList<>(ctlPrefs.getAll().keySet());
+                for (String k : keys) {
+                    if (k.startsWith("pos_") || k.endsWith("_scale") || k.endsWith("_alpha")) {
+                        e.remove(k);
+                    }
+                }                e.apply();
+                sbRacingSize.setProgress(100);
+                sbRacingAlpha.setProgress(85);
+                sbPadSize.setProgress(100);
+                sbPadAlpha.setProgress(85);
+                Toast.makeText(TitleActivity.this, "Control layouts reset to defaults.", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+
         // Turnip driver section
         TextView tvTurnipStatus = dialogView.findViewById(R.id.tv_turnip_status);
         Button btnInstallTurnip = dialogView.findViewById(R.id.btn_install_turnip);
@@ -1011,6 +1057,15 @@ public class TitleActivity extends Activity {
                 int selSpeed = Math.max(20, sbGameSpeed.getProgress());
                 String selGamertag = etGamertag.getText().toString().trim();
                 if (selGamertag.isEmpty()) selGamertag = "Player";
+
+                // Persist control layout settings (used by VirtualControllerInputView)
+                ctlPrefs.edit()
+                        .putString("ctl_mode", ctlLayoutValues[spCtlLayout.getSelectedItemPosition()])
+                        .putFloat("ctl_racing_scale", Math.max(60, sbRacingSize.getProgress()) / 100F)
+                        .putFloat("ctl_racing_alpha", Math.max(25, sbRacingAlpha.getProgress()) / 100F)
+                        .putFloat("ctl_pad_scale", Math.max(60, sbPadSize.getProgress()) / 100F)
+                        .putFloat("ctl_pad_alpha", Math.max(25, sbPadAlpha.getProgress()) / 100F)
+                        .apply();
 
                 prefs.edit()
                         .putString(KEY_RESOLUTION, selRes)
@@ -1232,5 +1287,21 @@ public class TitleActivity extends Activity {
             if (arr[i] == val) return i;
         }
         return defaultIdx;
+    }
+
+    /** Live-updates a "name: N%" label while its size/opacity seekbar moves. */
+    private void bindPercentSeekBar(SeekBar bar, TextView label, String prefix) {
+        label.setText(prefix + bar.getProgress() + "%");
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
+                label.setText(prefix + progress + "%");
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+    }
+
+    private static float clampF(float v, float min, float max) {
+        return v < min ? min : Math.min(v, max);
     }
 }

@@ -49,7 +49,7 @@ public class GameActivity extends NativeActivity {
         // Create VirtualControllerInputView from Windroid-emu
         controlsView = new VirtualControllerInputView(this);
         controlsView.setBackgroundColor(Color.TRANSPARENT);
-        controlsView.setAlpha(0.85F);
+        // Opacity is managed per-layout inside the view (launcher settings).
 
         // Map Windroid-emu virtual controller state to native XInput gamepad
         controlsView.setControllerListener((lx, ly, rx, ry, lt, rt, buttonsA, buttonsB, dpadStatus) -> {

@@ -7,16 +7,33 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
 /**
- * Virtual Controller from Windroid-emu adapted for NFSMW Recompiled.
- * Matches Windroid-emu layout, aesthetics, touch physics and button behaviors.
+ * Dual-layout virtual controller for NFSMW Recompiled.
+ *
+ * Two switchable layouts, both fully touch-driven and resolution-independent
+ * (all geometry is stored normalized to the view size):
+ *
+ *  - RACING: steering paddles, GAS/BRAKE pedals, NOS, handbrake,
+ *    speedbreaker, pause, camera and reset-car buttons.
+ *  - GAMEPAD: a full Xbox 360 style pad (dual sticks, D-pad, ABXY,
+ *    bumpers/triggers, Start/Back, stick clicks).
+ *
+ * A switch pill at the top-center toggles layouts at any time while playing.
+ * Long-press the switch pill to enter EDIT mode: drag any control to move it,
+ * long-press again to save and exit. Per-layout scale and opacity come from
+ * the launcher settings (and can be edited there); custom positions are
+ * persisted per layout.
  */
 public class VirtualControllerInputView extends View {
 
@@ -24,8 +41,7 @@ public class VirtualControllerInputView extends View {
     public final static int SHAPE_SQUARE = 1;
     public final static int SHAPE_RECTANGLE = 2;
     public final static int SHAPE_DPAD = 3;
-
-    public final static int GRID_SIZE = 10;
+    public final static int SHAPE_PILL = 4;
 
     public static final int UP = 1;
     public static final int RIGHT_UP = 2;
@@ -50,8 +66,23 @@ public class VirtualControllerInputView extends View {
     public final static int LS_BUTTON = 12;
     public final static int RS_BUTTON = 13;
     public final static int RIGHT_ANALOG = 14;
+    public final static int DPAD_CONTROL = 15;
 
-    // Button state bitmasks matching ControllerUtils
+    // Racing-layout control ids
+    public final static int STEER_L = 101;
+    public final static int STEER_R = 102;
+    public final static int GAS_PEDAL = 103;
+    public final static int BRAKE_PEDAL = 104;
+    public final static int NITRO = 105;
+    public final static int HANDBRAKE = 106;
+    public final static int SPEEDBREAKER = 107;
+    public final static int PAUSE_BTN = 108;
+    public final static int CAMERA_BTN = 109;
+    public final static int RESET_BTN = 110;
+
+    public final static int SWITCH_BTN = 0;
+
+    // Button state bitmasks matching GameActivity's XInput mapping
     public final static int MASK_A      = 0x01;
     public final static int MASK_B      = 0x02;
     public final static int MASK_X      = 0x04;
@@ -64,6 +95,12 @@ public class VirtualControllerInputView extends View {
     public final static int MASK_START  = 0x01;
     public final static int MASK_SELECT = 0x02;
 
+    public static final String MODE_GAMEPAD = "gamepad";
+    public static final String MODE_RACING = "racing";
+
+    private static final String PREFS_NAME = "virtual_controller_windroid";
+    private static final long LONG_PRESS_MS = 600;
+
     public interface ControllerListener {
         void onControllerState(float lx, float ly, float rx, float ry, float lt, float rt,
                                int buttonsA, int buttonsB, int dpadStatus);
@@ -71,43 +108,54 @@ public class VirtualControllerInputView extends View {
 
     private ControllerListener listener;
 
-    private Paint paint;
-    private Paint textPaint;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF rectF = new RectF();
 
     private final Path dpadUp = new Path();
     private final Path dpadDown = new Path();
     private final Path dpadLeft = new Path();
     private final Path dpadRight = new Path();
-    private final Path startButton = new Path();
-    private final Path selectButton = new Path();
 
-    private final ArrayList<VirtualControllerButton> buttonList = new ArrayList<>();
-    private VirtualXInputDPad dpad;
-    private VirtualXInputAnalog leftAnalog;
-    private VirtualXInputAnalog rightAnalog;
+    private final ArrayList<VCControl> controls = new ArrayList<>();
+    private final HashMap<Integer, VCControl> controlById = new HashMap<>();
+
+    private final SharedPreferences prefs;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private String mode = MODE_GAMEPAD;
+    private float layoutScale = 1.0F;
+    private float layoutAlpha = 0.85F;
+
+    private boolean isEditing = false;
+    private boolean dragging = false;
+    private VCControl dragControl = null;
+    private int dragPointerId = -1;
+    private float dragOffsetX = 0F;
+    private float dragOffsetY = 0F;
+    private boolean switchPressPendingToggle = false;
 
     private byte buttonsStateA = 0;
     private byte buttonsStateB = 0;
-    private float lt = 0;
-    private float rt = 0;
-    public boolean isEditing = false;
-    public static int virtualXInputControllerId = 0;
-
-    private float baseWidth = 2400F;
-    private float baseHeight = 1080F;
+    private float lt = 0F;
+    private float rt = 0F;
 
     public VirtualControllerInputView(Context context) {
         super(context);
+        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         init();
     }
 
     public VirtualControllerInputView(Context context, AttributeSet attrs) {
         super(context, attrs);
+        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         init();
     }
 
     public VirtualControllerInputView(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
+        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         init();
     }
 
@@ -115,621 +163,652 @@ public class VirtualControllerInputView extends View {
         this.listener = listener;
     }
 
+    /** Current layout mode ("gamepad" or "racing"). */
+    public String getMode() {
+        return mode;
+    }
+
     private void init() {
         setClickable(true);
         setFocusable(true);
         setFocusableInTouchMode(true);
 
-        paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setStrokeWidth(16F);
+        paint.setStrokeWidth(6F);
         paint.setColor(Color.WHITE);
         paint.setStyle(Paint.Style.STROKE);
 
-        textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fillPaint.setStyle(Paint.Style.FILL);
+
         textPaint.setColor(Color.WHITE);
         textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setTextSize(54F);
         textPaint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
 
-        // Default layout positioned for 2400x1080 base screen
-        addButton(A_BUTTON, 2065F, 910F, 180F, SHAPE_CIRCLE);
-        addButton(B_BUTTON, 2205F, 735F, 180F, SHAPE_CIRCLE);
-        addButton(X_BUTTON, 1925F, 735F, 180F, SHAPE_CIRCLE);
-        addButton(Y_BUTTON, 2065F, 560F, 180F, SHAPE_CIRCLE);
-        addButton(START_BUTTON, 1330F, 980F, 130F, SHAPE_CIRCLE);
-        addButton(SELECT_BUTTON, 1120F, 980F, 130F, SHAPE_CIRCLE);
-        addButton(LB_BUTTON, 280F, 300F, 260F, SHAPE_RECTANGLE);
-        addButton(LT_BUTTON, 280F, 140F, 260F, SHAPE_RECTANGLE);
-        addButton(RB_BUTTON, 2065F, 300F, 260F, SHAPE_RECTANGLE);
-        addButton(RT_BUTTON, 2065F, 140F, 260F, SHAPE_RECTANGLE);
-        addButton(LS_BUTTON, 880F, 980F, 180F, SHAPE_CIRCLE);
-        addButton(RS_BUTTON, 1560F, 980F, 180F, SHAPE_CIRCLE);
-
-        leftAnalog = new VirtualXInputAnalog(LEFT_ANALOG, 280F, 840F, 275F);
-        rightAnalog = new VirtualXInputAnalog(RIGHT_ANALOG, 1750F, 480F, 275F);
-        dpad = new VirtualXInputDPad(0, 640F, 480F, 200F);
-
-        loadSavedLayout();
+        mode = prefs.getString("ctl_mode", MODE_GAMEPAD);
+        rebuildLayout();
     }
 
-    private void loadSavedLayout() {
-        try {
-            SharedPreferences prefs = getContext().getSharedPreferences("virtual_controller_windroid", Context.MODE_PRIVATE);
-            if (prefs != null && prefs.contains("VC_BUTTON_" + A_BUTTON + "_X")) {
-                buttonList.forEach((i) -> {
-                    i.x = prefs.getFloat("VC_BUTTON_" + i.id + "_X", i.x);
-                    i.y = prefs.getFloat("VC_BUTTON_" + i.id + "_Y", i.y);
-                });
+    // ------------------------------------------------------------------
+    //  Layout construction
+    // ------------------------------------------------------------------
 
-                leftAnalog.x = prefs.getFloat("VC_BUTTON_" + LEFT_ANALOG + "_X", leftAnalog.x);
-                leftAnalog.y = prefs.getFloat("VC_BUTTON_" + LEFT_ANALOG + "_Y", leftAnalog.y);
+    private void rebuildLayout() {
+        releaseAllStates();
+        layoutScale = clamp(prefs.getFloat("ctl_" + mode + "_scale", 1.0F), 0.6F, 1.6F);
+        layoutAlpha = clamp(prefs.getFloat("ctl_" + mode + "_alpha", 0.85F), 0.25F, 1.0F);
 
-                rightAnalog.x = prefs.getFloat("VC_BUTTON_" + RIGHT_ANALOG + "_X", rightAnalog.x);
-                rightAnalog.y = prefs.getFloat("VC_BUTTON_" + RIGHT_ANALOG + "_Y", rightAnalog.y);
+        controls.clear();
+        controlById.clear();
 
-                dpad.x = prefs.getFloat("VC_BUTTON_DPAD_X", dpad.x);
-                dpad.y = prefs.getFloat("VC_BUTTON_DPAD_Y", dpad.y);
+        // Mode switch pill (top-center, fixed, not user-movable).
+        addControl(SWITCH_BTN, 0.5F, 0.062F, 0.0F, SHAPE_PILL, "");
+
+        if (MODE_RACING.equals(mode)) {
+            addControl(STEER_L,      0.105F, 0.735F, 0.300F, SHAPE_CIRCLE,    "◀");
+            addControl(STEER_R,      0.280F, 0.735F, 0.300F, SHAPE_CIRCLE,    "▶");
+            addControl(BRAKE_PEDAL,  0.735F, 0.775F, 0.220F, SHAPE_CIRCLE,    "BRK");
+            addControl(GAS_PEDAL,    0.915F, 0.775F, 0.220F, SHAPE_CIRCLE,    "GAS");
+            addControl(NITRO,        0.915F, 0.440F, 0.165F, SHAPE_CIRCLE,    "NOS");
+            addControl(HANDBRAKE,    0.735F, 0.440F, 0.165F, SHAPE_CIRCLE,    "HB");
+            addControl(SPEEDBREAKER, 0.585F, 0.600F, 0.150F, SHAPE_CIRCLE,    "SB");
+            addControl(PAUSE_BTN,    0.945F, 0.115F, 0.125F, SHAPE_CIRCLE,    "II");
+            addControl(CAMERA_BTN,   0.810F, 0.115F, 0.125F, SHAPE_CIRCLE,    "CAM");
+            addControl(RESET_BTN,    0.055F, 0.115F, 0.125F, SHAPE_CIRCLE,    "RST");
+        } else {
+            addControl(A_BUTTON,      0.860F, 0.843F, 0.167F, SHAPE_CIRCLE,    "A");
+            addControl(B_BUTTON,      0.919F, 0.681F, 0.167F, SHAPE_CIRCLE,    "B");
+            addControl(X_BUTTON,      0.802F, 0.681F, 0.167F, SHAPE_CIRCLE,    "X");
+            addControl(Y_BUTTON,      0.860F, 0.519F, 0.167F, SHAPE_CIRCLE,    "Y");
+            addControl(START_BUTTON,  0.554F, 0.907F, 0.120F, SHAPE_CIRCLE,    "");
+            addControl(SELECT_BUTTON, 0.467F, 0.907F, 0.120F, SHAPE_CIRCLE,    "");
+            addControl(LB_BUTTON,     0.117F, 0.278F, 0.240F, SHAPE_RECTANGLE, "LB");
+            addControl(LT_BUTTON,     0.117F, 0.130F, 0.240F, SHAPE_RECTANGLE, "LT");
+            addControl(RB_BUTTON,     0.860F, 0.278F, 0.240F, SHAPE_RECTANGLE, "RB");
+            addControl(RT_BUTTON,     0.860F, 0.130F, 0.240F, SHAPE_RECTANGLE, "RT");
+            addControl(LS_BUTTON,     0.240F, 0.560F, 0.140F, SHAPE_CIRCLE,    "LS");
+            addControl(RS_BUTTON,     0.640F, 0.560F, 0.140F, SHAPE_CIRCLE,    "RS");
+            addControl(LEFT_ANALOG,   0.117F, 0.778F, 0.255F, SHAPE_CIRCLE,    "");
+            addControl(RIGHT_ANALOG,  0.729F, 0.560F, 0.255F, SHAPE_CIRCLE,    "");
+            addControl(DPAD_CONTROL,  0.267F, 0.444F, 0.185F, SHAPE_DPAD,      "");
+        }
+
+        // Restore user-moved positions (normalized, per layout).
+        for (VCControl c : controls) {
+            if (c.id == SWITCH_BTN) continue;
+            if (prefs.getBoolean("pos_" + mode + "_" + c.id + "_set", false)) {
+                c.nx = clamp(prefs.getFloat("pos_" + mode + "_" + c.id + "_x", c.nx), 0.03F, 0.97F);
+                c.ny = clamp(prefs.getFloat("pos_" + mode + "_" + c.id + "_y", c.ny), 0.06F, 0.94F);
             }
-        } catch (Exception ignored) {}
+        }
+
+        applyGeometry();
+        invalidate();
+    }
+
+    private void addControl(int id, float nx, float ny, float nradius, int shape, String label) {
+        VCControl c = new VCControl(id, nx, ny, nradius, shape, label);
+        controls.add(c);
+        controlById.put(id, c);
+    }
+
+    /** Recomputes pixel geometry from normalized coordinates. */
+    private void applyGeometry() {
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) return;
+
+        float scaleBase = Math.min(w, h * 2.2F); // keeps buttons sane on very tall screens
+        for (VCControl c : controls) {
+            c.x = c.nx * w;
+            c.y = c.ny * h;
+            c.radius = (c.id == SWITCH_BTN ? 0.075F : c.nradius) * scaleBase * layoutScale;
+        }
+        textPaint.setTextSize(Math.max(30F, 0.055F * scaleBase * layoutScale));
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        if (w > 0 && h > 0) {
-            adjustButtonsForResolution(w, h);
-            invalidate();
+        applyGeometry();
+        invalidate();
+    }
+
+    private static float clamp(float v, float min, float max) {
+        return v < min ? min : Math.min(v, max);
+    }
+
+    // ------------------------------------------------------------------
+    //  Input state
+    // ------------------------------------------------------------------
+
+    private void handleButton(VCControl c, boolean isPressed) {
+        c.isPressed = isPressed;
+        switch (c.id) {
+            // Gamepad face / shoulders / clicks
+            case A_BUTTON:      setMask(isPressed, MASK_A); return;
+            case B_BUTTON:      setMask(isPressed, MASK_B); return;
+            case X_BUTTON:      setMask(isPressed, MASK_X); return;
+            case Y_BUTTON:      setMask(isPressed, MASK_Y); return;
+            case LB_BUTTON:     setMask(isPressed, MASK_LB); return;
+            case RB_BUTTON:     setMask(isPressed, MASK_RB); return;
+            case LS_BUTTON:     setMask(isPressed, MASK_LS); return;
+            case RS_BUTTON:     setMask(isPressed, MASK_RS); return;
+            case LT_BUTTON:     lt = isPressed ? 1F : 0F; return;
+            case RT_BUTTON:     rt = isPressed ? 1F : 0F; return;
+            case START_BUTTON:  setMaskB(isPressed, MASK_START); return;
+            case SELECT_BUTTON: setMaskB(isPressed, MASK_SELECT); return;
+
+            // Racing layout mapping (mirrors the engine's racing overlay)
+            case GAS_PEDAL:     rt = isPressed ? 1F : 0F; return;
+            case BRAKE_PEDAL:   lt = isPressed ? 1F : 0F; return;
+            case NITRO:         setMask(isPressed, MASK_A); return;
+            case HANDBRAKE:     setMask(isPressed, MASK_B); return;
+            case SPEEDBREAKER:  setMask(isPressed, MASK_LS); return;
+            case PAUSE_BTN:     setMaskB(isPressed, MASK_START); return;
+            case RESET_BTN:     setMaskB(isPressed, MASK_SELECT); return;
+            case CAMERA_BTN:    setMask(isPressed, MASK_RB); return;
+            default: return;
         }
     }
 
-    private void adjustButtonsForResolution(int actualWidth, int actualHeight) {
-        float scaleX = (float) actualWidth / baseWidth;
-        float scaleY = (float) actualHeight / baseHeight;
+    private void setMask(boolean isPressed, int mask) {
+        if (isPressed) buttonsStateA |= mask;
+        else buttonsStateA &= ~mask;
+    }
 
-        if (Math.abs(scaleX - 1.0F) > 0.02F || Math.abs(scaleY - 1.0F) > 0.02F) {
-            buttonList.forEach((i) -> {
-                i.x = (i.x / baseWidth) * actualWidth;
-                i.y = (i.y / baseHeight) * actualHeight;
-                i.radius = i.radius * Math.min(scaleX, scaleY);
-            });
+    private void setMaskB(boolean isPressed, int mask) {
+        if (isPressed) buttonsStateB |= mask;
+        else buttonsStateB &= ~mask;
+    }
 
-            leftAnalog.x = (leftAnalog.x / baseWidth) * actualWidth;
-            leftAnalog.y = (leftAnalog.y / baseHeight) * actualHeight;
-            leftAnalog.radius = leftAnalog.radius * Math.min(scaleX, scaleY);
-
-            rightAnalog.x = (rightAnalog.x / baseWidth) * actualWidth;
-            rightAnalog.y = (rightAnalog.y / baseHeight) * actualHeight;
-            rightAnalog.radius = rightAnalog.radius * Math.min(scaleX, scaleY);
-
-            dpad.x = (dpad.x / baseWidth) * actualWidth;
-            dpad.y = (dpad.y / baseHeight) * actualHeight;
-            dpad.radius = dpad.radius * Math.min(scaleX, scaleY);
-
-            textPaint.setTextSize(textPaint.getTextSize() * Math.min(scaleX, scaleY));
-            baseWidth = (float) actualWidth;
-            baseHeight = (float) actualHeight;
+    private void releaseAllStates() {
+        for (VCControl c : controls) {
+            c.isPressed = false;
+            c.fingerId = -1;
+            c.fingerX = 0F;
+            c.fingerY = 0F;
+            c.dpadStatus = 0;
         }
+        buttonsStateA = 0;
+        buttonsStateB = 0;
+        lt = 0F;
+        rt = 0F;
+        emitState();
     }
 
-    private void addButton(int id, float x, float y, float radius, int shape) {
-        buttonList.add(new VirtualControllerButton(id, x, y, radius, shape));
+    private void emitState() {
+        if (listener == null) return;
+
+        float lx = 0F, ly = 0F, rx = 0F, ry = 0F;
+        byte dpadStatus = 0;
+
+        VCControl left = controlById.get(LEFT_ANALOG);
+        VCControl right = controlById.get(RIGHT_ANALOG);
+        VCControl dpad = controlById.get(DPAD_CONTROL);
+
+        if (left != null && left.isPressed) {
+            lx = clamp(left.fingerX / (left.radius / 4F), -1F, 1F);
+            ly = clamp(left.fingerY / (left.radius / 4F), -1F, 1F);
+        }
+        if (right != null && right.isPressed) {
+            rx = clamp(right.fingerX / (right.radius / 4F), -1F, 1F);
+            ry = clamp(right.fingerY / (right.radius / 4F), -1F, 1F);
+        }
+
+        // Racing steering paddles drive the left stick X axis.
+        VCControl steerL = controlById.get(STEER_L);
+        VCControl steerR = controlById.get(STEER_R);
+        if (steerL != null && steerL.isPressed) lx = -1F;
+        if (steerR != null && steerR.isPressed) lx = 1F;
+
+        if (dpad != null) dpadStatus = (byte) dpad.dpadStatus;
+
+        listener.onControllerState(lx, ly, rx, ry, lt, rt, buttonsStateA, buttonsStateB, dpadStatus);
     }
 
-    private String getButtonName(int id) {
-        return switch (id) {
-            case A_BUTTON -> "A";
-            case B_BUTTON -> "B";
-            case X_BUTTON -> "X";
-            case Y_BUTTON -> "Y";
-            case RB_BUTTON -> "RB";
-            case LB_BUTTON -> "LB";
-            case RT_BUTTON -> "RT";
-            case LT_BUTTON -> "LT";
-            case RS_BUTTON -> "RS";
-            case LS_BUTTON -> "LS";
-            default -> "";
-        };
+    // ------------------------------------------------------------------
+    //  Layout switching + editing
+    // ------------------------------------------------------------------
+
+    private void toggleMode() {
+        mode = MODE_RACING.equals(mode) ? MODE_GAMEPAD : MODE_RACING;
+        prefs.edit().putString("ctl_mode", mode).apply();
+        rebuildLayout();
     }
 
-    private void drawDPad(Path path, boolean isPressed, Canvas canvas) {
-        paint.setStyle(isPressed ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
-        paint.setAlpha(isEditing ? 200 : (int) (getAlpha() * 200));
-        canvas.drawPath(path, paint);
+    private void toggleEdit() {
+        isEditing = !isEditing;
+        if (!isEditing && dragControl != null) {
+            savePosition(dragControl);
+            dragControl = null;
+            dragging = false;
+        }
+        releaseAllStates();
+        invalidate();
     }
 
-    public static boolean detectClick(MotionEvent event, int index, float x, float y, float radius, int shape) {
+    private void savePosition(VCControl c) {
+        prefs.edit()
+                .putBoolean("pos_" + mode + "_" + c.id + "_set", true)
+                .putFloat("pos_" + mode + "_" + c.id + "_x", c.nx)
+                .putFloat("pos_" + mode + "_" + c.id + "_y", c.ny)
+                .apply();
+    }
+
+    /** Clears custom positions and scale/opacity overrides for both layouts. */
+    public void resetLayouts() {
+        SharedPreferences.Editor e = prefs.edit();
+        for (String m : new String[] {MODE_GAMEPAD, MODE_RACING}) {
+            e.remove("ctl_" + m + "_scale").remove("ctl_" + m + "_alpha");
+            for (int id : new int[] {A_BUTTON, B_BUTTON, X_BUTTON, Y_BUTTON, START_BUTTON,
+                    SELECT_BUTTON, LB_BUTTON, LT_BUTTON, RB_BUTTON, RT_BUTTON, LEFT_ANALOG,
+                    LS_BUTTON, RS_BUTTON, RIGHT_ANALOG, DPAD_CONTROL, STEER_L, STEER_R,
+                    GAS_PEDAL, BRAKE_PEDAL, NITRO, HANDBRAKE, SPEEDBREAKER, PAUSE_BTN,
+                    CAMERA_BTN, RESET_BTN}) {
+                e.remove("pos_" + m + "_" + id + "_set")
+                        .remove("pos_" + m + "_" + id + "_x")
+                        .remove("pos_" + m + "_" + id + "_y");
+            }
+        }
+        e.apply();
+        rebuildLayout();
+    }
+
+    // ------------------------------------------------------------------
+    //  Touch handling
+    // ------------------------------------------------------------------
+
+    private static boolean hitTest(MotionEvent event, int index, VCControl c) {
         float ex = event.getX(index);
         float ey = event.getY(index);
-        float r = radius * 0.65F;
-        return switch (shape) {
-            case SHAPE_RECTANGLE -> (ex >= x - radius * 0.65F && ex <= x + radius * 0.65F) &&
-                    (ey >= y - radius * 0.4F && ey <= y + radius * 0.4F);
-            case SHAPE_DPAD -> (ex >= x - radius - 30F && ex <= x + radius + 30F) &&
-                    (ey >= y - radius - 30F && ey <= y + radius + 30F);
-            default -> (ex >= x - r && ex <= x + r) &&
-                    (ey >= y - r && ey <= y + r);
-        };
+        switch (c.shape) {
+            case SHAPE_RECTANGLE:
+                return (ex >= c.x - c.radius * 0.65F && ex <= c.x + c.radius * 0.65F) &&
+                        (ey >= c.y - c.radius * 0.40F && ey <= c.y + c.radius * 0.40F);
+            case SHAPE_DPAD:
+                return (ex >= c.x - c.radius - 30F && ex <= c.x + c.radius + 30F) &&
+                        (ey >= c.y - c.radius - 30F && ey <= c.y + c.radius + 30F);
+            case SHAPE_PILL:
+                return ex >= c.x - c.radius * 1.4F && ex <= c.x + c.radius * 1.4F &&
+                        ey >= c.y - c.radius * 0.6F && ey <= c.y + c.radius * 0.6F;
+            default:
+                float dx = ex - c.x;
+                float dy = ey - c.y;
+                float r = c.radius * 0.65F;
+                return dx * dx + dy * dy <= r * r;
+        }
     }
 
-    public static int getAxisStatus(float axisX, float axisY, float deadZone) {
-        boolean axisXNeutral = (axisX < deadZone && axisX > -deadZone);
-        boolean axisYNeutral = (axisY < deadZone && axisY > -deadZone);
+    private static int getAxisStatus(float axisX, float axisY, float deadZone) {
+        boolean xNeutral = (axisX < deadZone && axisX > -deadZone);
+        boolean yNeutral = (axisY < deadZone && axisY > -deadZone);
 
-        if (axisX > deadZone && axisY < -deadZone) {
-            return RIGHT_UP;
-        } else if (axisX > deadZone && axisYNeutral) {
-            return RIGHT;
-        } else if (axisX > deadZone && axisY > deadZone) {
-            return RIGHT_DOWN;
-        } else if (axisY > deadZone && axisXNeutral) {
-            return DOWN;
-        } else if (axisY < -deadZone && axisXNeutral) {
-            return UP;
-        } else if (axisX < -deadZone && axisY > deadZone) {
-            return LEFT_DOWN;
-        } else if (axisX < -deadZone && axisYNeutral) {
-            return LEFT;
-        } else if (axisX < -deadZone && axisY < -deadZone) {
-            return LEFT_UP;
-        }
-
+        if (axisX > deadZone && axisY < -deadZone) return RIGHT_UP;
+        if (axisX > deadZone && yNeutral) return RIGHT;
+        if (axisX > deadZone && axisY > deadZone) return RIGHT_DOWN;
+        if (axisY > deadZone && xNeutral) return DOWN;
+        if (axisY < -deadZone && xNeutral) return UP;
+        if (axisX < -deadZone && axisY > deadZone) return LEFT_DOWN;
+        if (axisX < -deadZone && yNeutral) return LEFT;
+        if (axisX < -deadZone && axisY < -deadZone) return LEFT_UP;
         return 0;
     }
 
-    @Override
-    protected void onDraw(Canvas canvas) {
-        super.onDraw(canvas);
-
-        buttonList.forEach((i) -> {
-            if (i.isPressed) {
-                paint.setStyle(Paint.Style.FILL_AND_STROKE);
-                textPaint.setColor(Color.BLACK);
-            } else {
-                paint.setStyle(Paint.Style.STROKE);
-                textPaint.setColor(Color.WHITE);
-            }
-            paint.setColor(Color.WHITE);
-            paint.setAlpha(isEditing ? 255 : (int) (getAlpha() * 255));
-            paint.setStrokeWidth(14F);
-            textPaint.setAlpha(isEditing ? 255 : (int) (getAlpha() * 255));
-
-            float offset = (textPaint.getFontMetrics().ascent + textPaint.getFontMetrics().descent) / 2F;
-
-            switch (i.shape) {
-                case SHAPE_CIRCLE -> canvas.drawCircle(i.x, i.y, i.radius / 2F, paint);
-                case SHAPE_RECTANGLE -> canvas.drawRoundRect(
-                        i.x - i.radius / 2F,
-                        i.y - i.radius / 4F,
-                        i.x + i.radius / 2F,
-                        i.y + i.radius / 4F,
-                        32F,
-                        32F,
-                        paint);
-            }
-
-            switch (i.id) {
-                case START_BUTTON -> {
-                    paint.setStrokeWidth(10F);
-
-                    startButton.reset();
-                    startButton.moveTo(i.x - i.radius / 3, i.y - i.radius / 8);
-                    startButton.lineTo(i.x - i.radius / 3 + i.radius - i.radius / 3, i.y - i.radius / 8);
-                    startButton.moveTo(i.x - i.radius / 3, i.y);
-                    startButton.lineTo(i.x - i.radius / 3 + i.radius - i.radius / 3, i.y);
-                    startButton.moveTo(i.x - i.radius / 3, i.y + i.radius / 8);
-                    startButton.lineTo(i.x - i.radius / 3 + i.radius - i.radius / 3, i.y + i.radius / 8);
-
-                    paint.setColor(i.isPressed ? Color.BLACK : Color.WHITE);
-                    paint.setAlpha(isEditing ? 200 : (int) (getAlpha() * 200));
-
-                    canvas.drawPath(startButton, paint);
-                }
-                case SELECT_BUTTON -> {
-                    paint.setStrokeWidth(10F);
-
-                    selectButton.reset();
-                    selectButton.moveTo(i.x - i.radius / 4F + 4F, i.y - i.radius / 4 + 40F);
-                    selectButton.lineTo(i.x - i.radius / 4F + 4F, i.y - i.radius / 4);
-                    selectButton.lineTo(i.x - i.radius / 4F + 4F + 40F, i.y - i.radius / 4);
-                    selectButton.lineTo(i.x - i.radius / 4F + 4F + 40F, i.y - i.radius / 4 + 20F);
-                    selectButton.lineTo(i.x - i.radius / 4F + 4F + 40F, i.y - i.radius / 4);
-                    selectButton.lineTo(i.x - i.radius / 4F + 4F, i.y - i.radius / 4);
-                    selectButton.close();
-                    selectButton.moveTo(i.x - i.radius / 4F + 20F, i.y - i.radius / 4 + 30F);
-                    selectButton.lineTo(i.x - i.radius / 4F + 60F, i.y - i.radius / 4 + 30F);
-                    selectButton.lineTo(i.x - i.radius / 4F + 60F, i.y - i.radius / 4 + 70F);
-                    selectButton.lineTo(i.x - i.radius / 4F + 20F, i.y - i.radius / 4 + 70F);
-                    selectButton.close();
-
-                    paint.setColor(i.isPressed ? Color.BLACK : Color.WHITE);
-                    paint.setAlpha(isEditing ? 200 : (int) (getAlpha() * 200));
-
-                    canvas.drawPath(selectButton, paint);
-                }
-                default -> canvas.drawText(getButtonName(i.id), i.x, i.y - offset - 4, textPaint);
-            }
-        });
-
-        // Left Analog Stick
-        float analogX = leftAnalog.x + leftAnalog.fingerX;
-        float analogY = leftAnalog.y + leftAnalog.fingerY;
-
-        float distSquared = (leftAnalog.fingerX * leftAnalog.fingerX) + (leftAnalog.fingerY * leftAnalog.fingerY);
-        float maxDist = (leftAnalog.radius / 4F) * (leftAnalog.radius / 4F);
-
-        if (distSquared > maxDist) {
-            float dist = (float) Math.sqrt(distSquared);
-            float scale = (leftAnalog.radius / 4F) / dist;
-            analogX = leftAnalog.x + (leftAnalog.fingerX * scale);
-            analogY = leftAnalog.y + (leftAnalog.fingerY * scale);
+    private void moveStick(VCControl stick, float ex, float ey) {
+        float posX = ex - stick.x;
+        float posY = ey - stick.y;
+        float maxDist = stick.radius / 4F;
+        float dist = (float) Math.sqrt(posX * posX + posY * posY);
+        if (dist > maxDist) {
+            float s = maxDist / dist;
+            posX *= s;
+            posY *= s;
         }
-
-        paint.setColor(Color.WHITE);
-        paint.setAlpha(isEditing ? 200 : (int) (getAlpha() * 200));
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(12F);
-        canvas.drawCircle(leftAnalog.x, leftAnalog.y, leftAnalog.radius / 2F, paint);
-
-        paint.setStyle(Paint.Style.FILL);
-        canvas.drawCircle(analogX, analogY, leftAnalog.radius / 4F, paint);
-
-        // Right Analog Stick
-        float rightAnalogX = rightAnalog.x + rightAnalog.fingerX;
-        float rightAnalogY = rightAnalog.y + rightAnalog.fingerY;
-
-        float rightDistSquared = (rightAnalog.fingerX * rightAnalog.fingerX)
-                + (rightAnalog.fingerY * rightAnalog.fingerY);
-        float rightMaxDist = (rightAnalog.radius / 4F) * (rightAnalog.radius / 4F);
-
-        if (rightDistSquared > rightMaxDist) {
-            float dist = (float) Math.sqrt(rightDistSquared);
-            float scale = (rightAnalog.radius / 4F) / dist;
-            rightAnalogX = rightAnalog.x + (rightAnalog.fingerX * scale);
-            rightAnalogY = rightAnalog.y + (rightAnalog.fingerY * scale);
-        }
-
-        paint.setColor(Color.WHITE);
-        paint.setAlpha(isEditing ? 200 : (int) (getAlpha() * 200));
-        paint.setStyle(Paint.Style.STROKE);
-        canvas.drawCircle(rightAnalog.x, rightAnalog.y, rightAnalog.radius / 2F, paint);
-
-        paint.setStyle(Paint.Style.FILL);
-        canvas.drawCircle(rightAnalogX, rightAnalogY, rightAnalog.radius / 4F, paint);
-
-        // D-Pad Drawing
-        dpadLeft.reset();
-        dpadLeft.moveTo(dpad.x - 20F, dpad.y);
-        dpadLeft.lineTo(dpad.x - 20F - dpad.radius / 4F, dpad.y - dpad.radius / 4F);
-        dpadLeft.lineTo(dpad.x - 20F - dpad.radius / 4F - dpad.radius / 2F, dpad.y - dpad.radius / 4F);
-        dpadLeft.lineTo(dpad.x - 20F - dpad.radius / 4F - dpad.radius / 2F, dpad.y - dpad.radius / 4F + dpad.radius / 2F);
-        dpadLeft.lineTo(dpad.x - 20F - dpad.radius / 4F, dpad.y - dpad.radius / 4F + dpad.radius / 2F);
-        dpadLeft.lineTo(dpad.x - 20F, dpad.y);
-        dpadLeft.close();
-
-        dpadUp.reset();
-        dpadUp.moveTo(dpad.x, dpad.y - 20F);
-        dpadUp.lineTo(dpad.x - dpad.radius / 4F, dpad.y - 20F - dpad.radius / 4F);
-        dpadUp.lineTo(dpad.x - dpad.radius / 4F, dpad.y - 20F - dpad.radius / 4F - dpad.radius / 2F);
-        dpadUp.lineTo(dpad.x - dpad.radius / 4F + dpad.radius / 2F, dpad.y - 20F - dpad.radius / 4F - dpad.radius / 2F);
-        dpadUp.lineTo(dpad.x - dpad.radius / 4F + dpad.radius / 2F, dpad.y - 20F - dpad.radius / 4F);
-        dpadUp.lineTo(dpad.x, dpad.y - 20F);
-        dpadUp.close();
-
-        dpadRight.reset();
-        dpadRight.moveTo(dpad.x + 20F, dpad.y);
-        dpadRight.lineTo(dpad.x + 20F + dpad.radius / 4F, dpad.y - dpad.radius / 4F);
-        dpadRight.lineTo(dpad.x + 20F + dpad.radius / 4F + dpad.radius / 2F, dpad.y - dpad.radius / 4F);
-        dpadRight.lineTo(dpad.x + 20F + dpad.radius / 4F + dpad.radius / 2F, dpad.y - dpad.radius / 4F + dpad.radius / 2F);
-        dpadRight.lineTo(dpad.x + 20F + dpad.radius / 4F, dpad.y - dpad.radius / 4F + dpad.radius / 2F);
-        dpadRight.lineTo(dpad.x + 20F, dpad.y);
-        dpadRight.close();
-
-        dpadDown.reset();
-        dpadDown.moveTo(dpad.x, dpad.y + 20F);
-        dpadDown.lineTo(dpad.x - dpad.radius / 4F, dpad.y + 20F + dpad.radius / 4F);
-        dpadDown.lineTo(dpad.x - dpad.radius / 4F, dpad.y + 20F + dpad.radius / 4F + dpad.radius / 2F);
-        dpadDown.lineTo(dpad.x - dpad.radius / 4F + dpad.radius / 2F, dpad.y + 20F + dpad.radius / 4F + dpad.radius / 2F);
-        dpadDown.lineTo(dpad.x - dpad.radius / 4F + dpad.radius / 2F, dpad.y + 20F + dpad.radius / 4F);
-        dpadDown.lineTo(dpad.x, dpad.y + 20F);
-        dpadDown.close();
-
-        drawDPad(dpadUp, dpad.dpadStatus == UP || dpad.dpadStatus == RIGHT_UP || dpad.dpadStatus == LEFT_UP, canvas);
-        drawDPad(dpadDown, dpad.dpadStatus == DOWN || dpad.dpadStatus == RIGHT_DOWN || dpad.dpadStatus == LEFT_DOWN, canvas);
-        drawDPad(dpadLeft, dpad.dpadStatus == LEFT || dpad.dpadStatus == LEFT_DOWN || dpad.dpadStatus == LEFT_UP, canvas);
-        drawDPad(dpadRight, dpad.dpadStatus == RIGHT || dpad.dpadStatus == RIGHT_DOWN || dpad.dpadStatus == RIGHT_UP, canvas);
+        stick.fingerX = posX;
+        stick.fingerY = posY;
     }
 
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
-        int actionIdx = event.getActionIndex();
-// Touch logging disabled for performance
+        int idx = event.getActionIndex();
 
-        float lx = leftAnalog.isPressed ? (leftAnalog.fingerX / (leftAnalog.radius / 4)) : 0F;
-        float ly = leftAnalog.isPressed ? (leftAnalog.fingerY / (leftAnalog.radius / 4)) : 0F;
-        float rx = rightAnalog.isPressed ? (rightAnalog.fingerX / (rightAnalog.radius / 4)) : 0F;
-        float ry = rightAnalog.isPressed ? (rightAnalog.fingerY / (rightAnalog.radius / 4)) : 0F;
-        byte dpadStatus = (byte) dpad.dpadStatus;
+        switch (action) {
+            case MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                // Switch pill: tap = toggle layout, long-press = edit mode.
+                VCControl sw = controlById.get(SWITCH_BTN);
+                if (sw != null && hitTest(event, idx, sw)) {
+                    sw.isPressed = true;
+                    sw.fingerId = event.getPointerId(idx);
+                    switchPressPendingToggle = true;
+                    handler.postDelayed(() -> {
+                        if (sw.isPressed) {
+                            switchPressPendingToggle = false;
+                            toggleEdit();
+                        }
+                    }, LONG_PRESS_MS);
+                    invalidate();
+                    return true;
+                }
 
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_DOWN -> {
-                for (VirtualControllerButton i : buttonList) {
-                    if (detectClick(event, event.getActionIndex(), i.x, i.y, i.radius, i.shape)) {
-                        i.fingerId = event.getPointerId(event.getActionIndex());
-                        i.isPressed = true;
-                        handleButton(i, true);
-                        break;
+                if (isEditing) {
+                    for (VCControl c : controls) {
+                        if (c.id == SWITCH_BTN) continue;
+                        if (hitTest(event, idx, c)) {
+                            dragControl = c;
+                            dragging = true;
+                            dragPointerId = event.getPointerId(idx);
+                            dragOffsetX = c.x - event.getX(idx);
+                            dragOffsetY = c.y - event.getY(idx);
+                            break;
+                        }
                     }
+                    invalidate();
+                    return true;
                 }
 
-                if (detectClick(event, event.getActionIndex(), leftAnalog.x, leftAnalog.y, leftAnalog.radius, SHAPE_CIRCLE)) {
-                    float posX = event.getX(event.getActionIndex()) - leftAnalog.x;
-                    float posY = event.getY(event.getActionIndex()) - leftAnalog.y;
+                for (VCControl c : controls) {
+                    if (c.id == SWITCH_BTN) continue;
+                    if (!hitTest(event, idx, c)) continue;
 
-                    leftAnalog.fingerId = event.getPointerId(event.getActionIndex());
+                    c.fingerId = event.getPointerId(idx);
 
-                    float maxDist = leftAnalog.radius / 4F;
-                    float dist = (float) Math.sqrt(posX * posX + posY * posY);
-
-                    if (dist > maxDist) {
-                        float scale = maxDist / dist;
-                        posX *= scale;
-                        posY *= scale;
+                    if (c.shape == SHAPE_CIRCLE && (c.id == LEFT_ANALOG || c.id == RIGHT_ANALOG)) {
+                        c.isPressed = true;
+                        moveStick(c, event.getX(idx), event.getY(idx));
+                    } else if (c.shape == SHAPE_DPAD) {
+                        c.isPressed = true;
+                        c.fingerX = event.getX(idx) - c.x;
+                        c.fingerY = event.getY(idx) - c.y;
+                        c.dpadStatus = getAxisStatus(c.fingerX / c.radius, c.fingerY / c.radius, 0.25F);
+                    } else {
+                        handleButton(c, true);
                     }
-
-                    leftAnalog.fingerX = posX;
-                    leftAnalog.fingerY = posY;
-                    leftAnalog.isPressed = true;
-
-                    lx = (posX / maxDist);
-                    ly = (posY / maxDist);
+                    break;
                 }
-
-                if (detectClick(event, event.getActionIndex(), rightAnalog.x, rightAnalog.y, rightAnalog.radius, SHAPE_CIRCLE)) {
-                    float posX = event.getX(event.getActionIndex()) - rightAnalog.x;
-                    float posY = event.getY(event.getActionIndex()) - rightAnalog.y;
-
-                    rightAnalog.fingerId = event.getPointerId(event.getActionIndex());
-
-                    float maxDist = rightAnalog.radius / 4F;
-                    float dist = (float) Math.sqrt(posX * posX + posY * posY);
-
-                    if (dist > maxDist) {
-                        float scale = maxDist / dist;
-                        posX *= scale;
-                        posY *= scale;
-                    }
-
-                    rightAnalog.fingerX = posX;
-                    rightAnalog.fingerY = posY;
-                    rightAnalog.isPressed = true;
-
-                    rx = (posX / maxDist);
-                    ry = (posY / maxDist);
-                }
-
-                if (detectClick(event, event.getActionIndex(), dpad.x, dpad.y, dpad.radius, SHAPE_DPAD)) {
-                    float posX = event.getX(event.getActionIndex()) - dpad.x;
-                    float posY = event.getY(event.getActionIndex()) - dpad.y;
-
-                    dpad.fingerId = event.getPointerId(event.getActionIndex());
-                    dpad.fingerX = posX;
-                    dpad.fingerY = posY;
-                    dpad.isPressed = true;
-                    dpad.dpadStatus = getAxisStatus(posX / dpad.radius, posY / dpad.radius, 0.25F);
-
-                    dpadStatus = (byte) dpad.dpadStatus;
-                }
-
                 invalidate();
             }
             case MotionEvent.ACTION_MOVE -> {
-                for (int i = 0; i < event.getPointerCount(); i++) {
-                    if (leftAnalog.isPressed && leftAnalog.fingerId == event.getPointerId(i)) {
-                        float posX = event.getX(i) - leftAnalog.x;
-                        float posY = event.getY(i) - leftAnalog.y;
-
-                        float maxDist = leftAnalog.radius / 4F;
-                        float dist = (float) Math.sqrt(posX * posX + posY * posY);
-
-                        if (dist > maxDist) {
-                            float scale = maxDist / dist;
-                            posX *= scale;
-                            posY *= scale;
-                        }
-
-                        leftAnalog.fingerX = posX;
-                        leftAnalog.fingerY = posY;
-
-                        lx = (posX / maxDist);
-                        ly = (posY / maxDist);
+                if (dragging && dragControl != null && isEditing) {
+                    int di = event.findPointerIndex(dragPointerId);
+                    if (di >= 0) {
+                        int w = getWidth();
+                        int h = getHeight();
+                        dragControl.nx = clamp((event.getX(di) + dragOffsetX) / w, 0.03F, 0.97F);
+                        dragControl.ny = clamp((event.getY(di) + dragOffsetY) / h, 0.06F, 0.94F);
+                        applyGeometry();
                     }
-
-                    if (rightAnalog.isPressed && rightAnalog.fingerId == event.getPointerId(i)) {
-                        float posX = event.getX(i) - rightAnalog.x;
-                        float posY = event.getY(i) - rightAnalog.y;
-
-                        float maxDist = rightAnalog.radius / 4F;
-                        float dist = (float) Math.sqrt(posX * posX + posY * posY);
-
-                        if (dist > maxDist) {
-                            float scale = maxDist / dist;
-                            posX *= scale;
-                            posY *= scale;
+                    invalidate();
+                    return true;
+                }
+                if (!isEditing) {
+                    for (int i = 0; i < event.getPointerCount(); i++) {
+                        int pid = event.getPointerId(i);
+                        for (VCControl c : controls) {
+                            if (c.fingerId != pid) continue;
+                            if (c.id == LEFT_ANALOG || c.id == RIGHT_ANALOG) {
+                                moveStick(c, event.getX(i), event.getY(i));
+                            } else if (c.shape == SHAPE_DPAD) {
+                                c.fingerX = event.getX(i) - c.x;
+                                c.fingerY = event.getY(i) - c.y;
+                                c.dpadStatus = getAxisStatus(c.fingerX / c.radius, c.fingerY / c.radius, 0.25F);
+                            }
                         }
-
-                        rightAnalog.fingerX = posX;
-                        rightAnalog.fingerY = posY;
-
-                        rx = (posX / maxDist);
-                        ry = (posY / maxDist);
-                    }
-
-                    if (dpad.isPressed && dpad.fingerId == event.getPointerId(i)) {
-                        float posX = event.getX(i) - dpad.x;
-                        float posY = event.getY(i) - dpad.y;
-
-                        dpad.fingerX = posX;
-                        dpad.fingerY = posY;
-                        dpad.dpadStatus = getAxisStatus(posX / dpad.radius, posY / dpad.radius, 0.25F);
-
-                        dpadStatus = (byte) dpad.dpadStatus;
                     }
                 }
-
                 invalidate();
             }
             case MotionEvent.ACTION_POINTER_UP -> {
-                for (VirtualControllerButton i : buttonList) {
-                    if (i.fingerId == event.getPointerId(event.getActionIndex())) {
-                        i.fingerId = -1;
-                        handleButton(i, false);
+                int pid = event.getPointerId(idx);
+
+                VCControl sw = controlById.get(SWITCH_BTN);
+                if (sw != null && sw.fingerId == pid) {
+                    sw.fingerId = -1;
+                    sw.isPressed = false;
+                    if (switchPressPendingToggle) {
+                        switchPressPendingToggle = false;
+                        toggleMode();
+                    }
+                    invalidate();
+                    return true;
+                }
+
+                for (VCControl c : controls) {
+                    if (c.fingerId == pid) {
+                        c.fingerId = -1;
+                        if (c.id == LEFT_ANALOG || c.id == RIGHT_ANALOG) {
+                            c.isPressed = false;
+                            c.fingerX = 0F;
+                            c.fingerY = 0F;
+                        } else if (c.shape == SHAPE_DPAD) {
+                            c.isPressed = false;
+                            c.fingerX = 0F;
+                            c.fingerY = 0F;
+                            c.dpadStatus = 0;
+                        } else {
+                            handleButton(c, false);
+                        }
                     }
                 }
-
-                if (leftAnalog.fingerId == event.getPointerId(event.getActionIndex())) {
-                    leftAnalog.fingerId = -1;
-                    leftAnalog.fingerX = 0F;
-                    leftAnalog.fingerY = 0F;
-                    leftAnalog.isPressed = false;
-
-                    lx = 0F;
-                    ly = 0F;
-                }
-
-                if (rightAnalog.fingerId == event.getPointerId(event.getActionIndex())) {
-                    rightAnalog.fingerId = -1;
-                    rightAnalog.fingerX = 0F;
-                    rightAnalog.fingerY = 0F;
-                    rightAnalog.isPressed = false;
-
-                    rx = 0F;
-                    ry = 0F;
-                }
-
-                if (dpad.fingerId == event.getPointerId(event.getActionIndex())) {
-                    dpad.fingerId = -1;
-                    dpad.fingerX = 0F;
-                    dpad.fingerY = 0F;
-                    dpad.isPressed = false;
-                    dpad.dpadStatus = 0;
-
-                    dpadStatus = 0;
-                }
-
                 invalidate();
             }
             case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                for (VirtualControllerButton i : buttonList) {
-                    if (i.isPressed) {
-                        i.fingerId = -1;
-                        handleButton(i, false);
+                VCControl sw = controlById.get(SWITCH_BTN);
+                if (sw != null && sw.isPressed) {
+                    sw.fingerId = -1;
+                    sw.isPressed = false;
+                    if (switchPressPendingToggle) {
+                        switchPressPendingToggle = false;
+                        toggleMode();
                     }
                 }
-
-                leftAnalog.fingerId = -1;
-                leftAnalog.fingerX = 0F;
-                leftAnalog.fingerY = 0F;
-                leftAnalog.isPressed = false;
-                lx = 0F;
-                ly = 0F;
-
-                rightAnalog.fingerId = -1;
-                rightAnalog.fingerX = 0F;
-                rightAnalog.fingerY = 0F;
-                rightAnalog.isPressed = false;
-                rx = 0F;
-                ry = 0F;
-
-                dpad.fingerId = -1;
-                dpad.fingerX = 0F;
-                dpad.fingerY = 0F;
-                dpad.isPressed = false;
-                dpad.dpadStatus = 0;
-                dpadStatus = 0;
-
+                if (dragging && dragControl != null) {
+                    savePosition(dragControl);
+                    dragControl = null;
+                    dragging = false;
+                }
+                releaseAllStates();
                 invalidate();
             }
         }
 
-        if (listener != null) {
-            listener.onControllerState(lx, ly, rx, ry, lt, rt, buttonsStateA, buttonsStateB, dpadStatus);
-        }
-
+        emitState();
         return true;
     }
 
-    private void handleButton(VirtualControllerButton button, boolean isPressed) {
-        button.isPressed = isPressed;
-// Button logging disabled for performance
+    // ------------------------------------------------------------------
+    //  Drawing
+    // ------------------------------------------------------------------
 
-        switch (button.id) {
-            case A_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_A;
-                else buttonsStateA &= ~MASK_A;
+    private int alpha(int base) {
+        return (int) (base * layoutAlpha);
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+
+        // Controls
+        for (VCControl c : controls) {
+            if (c.id == SWITCH_BTN) continue;
+
+            boolean pressed = c.isPressed;
+            paint.setStyle(pressed || (isEditing && c == dragControl)
+                    ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
+            paint.setColor(Color.WHITE);
+            paint.setStrokeWidth(6F);
+            paint.setAlpha(alpha(isEditing ? 255 : 210));
+
+            boolean hasLabel = c.label != null && !c.label.isEmpty();
+            textPaint.setColor(pressed ? Color.BLACK : Color.WHITE);
+            textPaint.setAlpha(alpha(isEditing ? 255 : 235));
+
+            float offset = (textPaint.getFontMetrics().ascent + textPaint.getFontMetrics().descent) / 2F;
+
+            if (c.shape == SHAPE_DPAD) {
+                drawDPadArrows(canvas, c);
+                continue;
             }
-            case B_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_B;
-                else buttonsStateA &= ~MASK_B;
+
+            if (c.id == LEFT_ANALOG || c.id == RIGHT_ANALOG) {
+                // Stick base + knob
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setAlpha(alpha(isEditing ? 255 : 200));
+                paint.setStrokeWidth(8F);
+                canvas.drawCircle(c.x, c.y, c.radius / 2F, paint);
+
+                float knobX = c.x + c.fingerX;
+                float knobY = c.y + c.fingerY;
+                float maxDist = c.radius / 4F;
+                float distSq = c.fingerX * c.fingerX + c.fingerY * c.fingerY;
+                if (distSq > maxDist * maxDist) {
+                    float dist = (float) Math.sqrt(distSq);
+                    knobX = c.x + c.fingerX * (maxDist / dist);
+                    knobY = c.y + c.fingerY * (maxDist / dist);
+                }
+                fillPaint.setColor(Color.WHITE);
+                fillPaint.setAlpha(alpha(isEditing ? 255 : 200));
+                canvas.drawCircle(knobX, knobY, c.radius / 4F, fillPaint);
+                continue;
             }
-            case X_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_X;
-                else buttonsStateA &= ~MASK_X;
+
+            if (c.shape == SHAPE_RECTANGLE) {
+                rectF.set(c.x - c.radius / 2F, c.y - c.radius / 4F,
+                        c.x + c.radius / 2F, c.y + c.radius / 4F);
+                canvas.drawRoundRect(rectF, 24F, 24F, paint);
+            } else {
+                canvas.drawCircle(c.x, c.y, c.radius / 2F, paint);
             }
-            case Y_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_Y;
-                else buttonsStateA &= ~MASK_Y;
+
+            if (hasLabel) {
+                canvas.drawText(c.label, c.x, c.y - offset, textPaint);
             }
-            case START_BUTTON -> {
-                if (isPressed) buttonsStateB |= MASK_START;
-                else buttonsStateB &= ~MASK_START;
+
+            if (c.id == START_BUTTON) {
+                drawStartGlyph(canvas, c);
+            } else if (c.id == SELECT_BUTTON) {
+                drawSelectGlyph(canvas, c);
             }
-            case SELECT_BUTTON -> {
-                if (isPressed) buttonsStateB |= MASK_SELECT;
-                else buttonsStateB &= ~MASK_SELECT;
-            }
-            case LB_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_LB;
-                else buttonsStateA &= ~MASK_LB;
-            }
-            case LT_BUTTON -> lt = isPressed ? 1F : 0F;
-            case RB_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_RB;
-                else buttonsStateA &= ~MASK_RB;
-            }
-            case RT_BUTTON -> rt = isPressed ? 1F : 0F;
-            case LS_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_LS;
-                else buttonsStateA &= ~MASK_LS;
-            }
-            case RS_BUTTON -> {
-                if (isPressed) buttonsStateA |= MASK_RS;
-                else buttonsStateA &= ~MASK_RS;
-            }
+        }
+
+        drawSwitchPill(canvas);
+
+        if (isEditing) {
+            textPaint.setColor(Color.YELLOW);
+            textPaint.setAlpha(255);
+            float w = getWidth();
+            canvas.drawText("EDIT MODE - drag controls, long-press switch to finish",
+                    w / 2F, textPaint.getTextSize() * 3.6F, textPaint);
         }
     }
 
-    public static class VirtualControllerButton {
-        public int id;
-        public float x;
-        public float y;
-        public float radius;
-        public int shape;
-        public int fingerId = -1;
-        public boolean isPressed = false;
+    private void drawSwitchPill(Canvas canvas) {
+        VCControl sw = controlById.get(SWITCH_BTN);
+        if (sw == null) return;
 
-        public VirtualControllerButton(int id, float x, float y, float radius, int shape) {
-            this.id = id;
-            this.x = x;
-            this.y = y;
-            this.radius = radius;
-            this.shape = shape;
+        String label = MODE_RACING.equals(mode) ? "RACE" : "PAD";
+        paint.setStyle(sw.isPressed || isEditing ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
+        paint.setColor(isEditing ? Color.YELLOW : Color.WHITE);
+        paint.setStrokeWidth(4F);
+        paint.setAlpha(alpha(isEditing ? 255 : 200));
+
+        rectF.set(sw.x - sw.radius * 1.35F, sw.y - sw.radius * 0.55F,
+                sw.x + sw.radius * 1.35F, sw.y + sw.radius * 0.55F);
+        canvas.drawRoundRect(rectF, sw.radius * 0.55F, sw.radius * 0.55F, paint);
+
+        textPaint.setColor(sw.isPressed ? Color.BLACK : (isEditing ? Color.YELLOW : Color.WHITE));
+        textPaint.setAlpha(alpha(isEditing ? 255 : 240));
+        float offset = (textPaint.getFontMetrics().ascent + textPaint.getFontMetrics().descent) / 2F;
+        canvas.drawText("\u21C4 " + label, sw.x, sw.y - offset, textPaint);
+    }
+
+    private void drawStartGlyph(Canvas canvas, VCControl c) {
+        paint.setStrokeWidth(4F);
+        paint.setColor(c.isPressed ? Color.BLACK : Color.WHITE);
+        paint.setAlpha(alpha(isEditing ? 255 : 230));
+        float w = c.radius / 3F;
+        for (int i = -1; i <= 1; i++) {
+            float yy = c.y + i * c.radius / 7F;
+            canvas.drawLine(c.x - w / 2F, yy, c.x + w / 2F, yy, paint);
         }
     }
 
-    public static class VirtualXInputDPad {
-        public int id;
+    private void drawSelectGlyph(Canvas canvas, VCControl c) {
+        paint.setStrokeWidth(4F);
+        paint.setColor(c.isPressed ? Color.BLACK : Color.WHITE);
+        paint.setAlpha(alpha(isEditing ? 255 : 230));
+        // Two overlapping rounded rectangles (the 360 "back" glyphs)
+        float s = c.radius / 5F;
+        rectF.set(c.x - s * 1.4F, c.y - s * 0.8F, c.x - s * 0.4F, c.y + s * 0.8F);
+        canvas.drawRoundRect(rectF, 3F, 3F, paint);
+        rectF.set(c.x + s * 0.4F, c.y - s * 0.8F, c.x + s * 1.4F, c.y + s * 0.8F);
+        canvas.drawRoundRect(rectF, 3F, 3F, paint);
+    }
+
+    private void drawDPadArrows(Canvas canvas, VCControl c) {
+        float r = c.radius;
+        dpadLeft.reset();
+        dpadLeft.moveTo(c.x - 10F, c.y);
+        dpadLeft.lineTo(c.x - 10F - r / 4F, c.y - r / 4F);
+        dpadLeft.lineTo(c.x - 10F - r / 4F - r / 2F, c.y - r / 4F);
+        dpadLeft.lineTo(c.x - 10F - r / 4F - r / 2F, c.y - r / 4F + r / 2F);
+        dpadLeft.lineTo(c.x - 10F - r / 4F, c.y - r / 4F + r / 2F);
+        dpadLeft.lineTo(c.x - 10F, c.y);
+        dpadLeft.close();
+
+        dpadRight.reset();
+        dpadRight.moveTo(c.x + 10F, c.y);
+        dpadRight.lineTo(c.x + 10F + r / 4F, c.y - r / 4F);
+        dpadRight.lineTo(c.x + 10F + r / 4F + r / 2F, c.y - r / 4F);
+        dpadRight.lineTo(c.x + 10F + r / 4F + r / 2F, c.y - r / 4F + r / 2F);
+        dpadRight.lineTo(c.x + 10F + r / 4F, c.y - r / 4F + r / 2F);
+        dpadRight.lineTo(c.x + 10F, c.y);
+        dpadRight.close();
+
+        dpadUp.reset();
+        dpadUp.moveTo(c.x, c.y - 10F);
+        dpadUp.lineTo(c.x - r / 4F, c.y - 10F - r / 4F);
+        dpadUp.lineTo(c.x - r / 4F, c.y - 10F - r / 4F - r / 2F);
+        dpadUp.lineTo(c.x - r / 4F + r / 2F, c.y - 10F - r / 4F - r / 2F);
+        dpadUp.lineTo(c.x - r / 4F + r / 2F, c.y - 10F - r / 4F);
+        dpadUp.lineTo(c.x, c.y - 10F);
+        dpadUp.close();
+
+        dpadDown.reset();
+        dpadDown.moveTo(c.x, c.y + 10F);
+        dpadDown.lineTo(c.x - r / 4F, c.y + 10F + r / 4F);
+        dpadDown.lineTo(c.x - r / 4F, c.y + 10F + r / 4F + r / 2F);
+        dpadDown.lineTo(c.x - r / 4F + r / 2F, c.y + 10F + r / 4F + r / 2F);
+        dpadDown.lineTo(c.x - r / 4F + r / 2F, c.y + 10F + r / 4F);
+        dpadDown.lineTo(c.x, c.y + 10F);
+        dpadDown.close();
+
+        paint.setStrokeWidth(4F);
+        paint.setAlpha(alpha(isEditing ? 255 : 200));
+        int stat = c.dpadStatus;
+        drawArrow(canvas, dpadUp,    stat == UP || stat == RIGHT_UP || stat == LEFT_UP);
+        drawArrow(canvas, dpadDown,  stat == DOWN || stat == RIGHT_DOWN || stat == LEFT_DOWN);
+        drawArrow(canvas, dpadLeft,  stat == LEFT || stat == LEFT_DOWN || stat == LEFT_UP);
+        drawArrow(canvas, dpadRight, stat == RIGHT || stat == RIGHT_DOWN || stat == RIGHT_UP);
+    }
+
+    private void drawArrow(Canvas canvas, Path path, boolean pressed) {
+        paint.setStyle(pressed ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
+        paint.setColor(Color.WHITE);
+        canvas.drawPath(path, paint);
+    }
+
+    // ------------------------------------------------------------------
+    //  Control model
+    // ------------------------------------------------------------------
+
+    public static class VCControl {
+        public final int id;
+        public final int shape;
+        public final String label;
+        public float nx;      // normalized center X (0..1 of view width)
+        public float ny;      // normalized center Y (0..1 of view height)
+        public float nradius; // normalized radius (fraction of view height)
         public float x;
         public float y;
         public float radius;
@@ -739,29 +818,13 @@ public class VirtualControllerInputView extends View {
         public float fingerY = 0F;
         public int dpadStatus = 0;
 
-        public VirtualXInputDPad(int id, float x, float y, float radius) {
+        public VCControl(int id, float nx, float ny, float nradius, int shape, String label) {
             this.id = id;
-            this.x = x;
-            this.y = y;
-            this.radius = radius;
-        }
-    }
-
-    public static class VirtualXInputAnalog {
-        public int id;
-        public float x;
-        public float y;
-        public float radius;
-        public int fingerId = -1;
-        public boolean isPressed = false;
-        public float fingerX = 0F;
-        public float fingerY = 0F;
-
-        public VirtualXInputAnalog(int id, float x, float y, float radius) {
-            this.id = id;
-            this.x = x;
-            this.y = y;
-            this.radius = radius;
+            this.nx = nx;
+            this.ny = ny;
+            this.nradius = nradius;
+            this.shape = shape;
+            this.label = label;
         }
     }
 }

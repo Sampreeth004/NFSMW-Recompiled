@@ -530,6 +530,132 @@
                 android:layout_marginBottom="12dp" />
 
             <!-- ========================================================= -->
+            <!-- SEÇÃO: CONTROLS                                           -->
+            <!-- ========================================================= -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🕹 CONTROLS"
+                android:textColor="@color/nfsmw_amber_light"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Default On-Screen Layout:"
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:layout_marginBottom="2dp" />
+
+            <Spinner
+                android:id="@+id/sp_ctl_layout"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@drawable/spinner_bg"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="ℹ Switch layouts anytime in-game with the pill button at the top of the screen. Long-press it to drag controls anywhere you like."
+                android:textColor="#A0A0A0"
+                android:textSize="10sp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_ctl_racing_size"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Racing layout size: 100%"
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:layout_marginBottom="2dp" />
+
+            <SeekBar
+                android:id="@+id/sb_ctl_racing_size"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="60"
+                android:max="160"
+                android:progress="100"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_ctl_racing_alpha"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Racing layout opacity: 85%"
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:layout_marginBottom="2dp" />
+
+            <SeekBar
+                android:id="@+id/sb_ctl_racing_alpha"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="25"
+                android:max="100"
+                android:progress="85"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:id="@+id/tv_ctl_pad_size"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Gamepad layout size: 100%"
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:layout_marginBottom="2dp" />
+
+            <SeekBar
+                android:id="@+id/sb_ctl_pad_size"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="60"
+                android:max="160"
+                android:progress="100"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_ctl_pad_alpha"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Gamepad layout opacity: 85%"
+                android:textColor="#E0E0E0"
+                android:textSize="12sp"
+                android:layout_marginBottom="2dp" />
+
+            <SeekBar
+                android:id="@+id/sb_ctl_pad_alpha"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:min="25"
+                android:max="100"
+                android:progress="85"
+                android:layout_marginBottom="10dp" />
+
+            <Button
+                android:id="@+id/btn_reset_controls"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:background="@drawable/rom_button_bg"
+                android:text="↺ RESET CONTROL POSITIONS &amp; SIZES"
+                android:textColor="#CCCCCC"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="10dp" />
+
+            <!-- Divisor -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#20FFFFFF"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="12dp" />
+
+            <!-- ========================================================= -->
             <!-- SEÇÃO 5: DRIVER VULKAN (TURNIP / MESA)                    -->
             <!-- ========================================================= -->
             <TextView
